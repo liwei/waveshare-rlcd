@@ -1,0 +1,17 @@
+dependencies:
+  esp_codec_dev:
+    dependencies: []
+    source:
+      path: /Users/fydeos/waveshare-rlcd/dino_rlcd/src/ExternLib/esp_codec_dev
+      type: local
+    version: 1.3.5
+  idf:
+    source:
+      type: idf
+    version: 5.5.5
+direct_dependencies:
+- espressif/esp_codec_dev
+- idf
+manifest_hash: 7120e5db7478e067f73c40ecf7f82a301a67bcf30fbce8bb054688c8b5858020
+target: esp32s3
+version: 2.0.0
