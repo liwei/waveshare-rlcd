@@ -1,0 +1,6 @@
+# macOS metadata
+.DS_Store
+._*
+
+# Build output (gameboy_rlcd/ ignores its own in more detail)
+build/
