@@ -31,6 +31,7 @@ static const char *TAG = "btpad";
 static volatile uint8_t s_gb_mask;
 static volatile bool s_menu_edge;
 static bool s_menu_prev;
+static bool s_spend_chord;
 static volatile bool s_connected;
 static char s_name[48] = "";
 
@@ -160,6 +161,20 @@ static uint8_t stick_to_dpad(const hid_gamepad_map_t *map, const hid_gamepad_sta
   return mask;
 }
 
+// Are either of the pad's menu-chord buttons still held?
+static bool pad_chord_buttons_down(const hid_gamepad_state_t *state) {
+  const pad_profile_t *p = s_profile;
+  const uint32_t b = state->buttons;
+
+#define HELD(idx) ((idx) >= 0 && ((b >> (idx)) & 1u))
+
+  const bool down = HELD(p->start) || HELD(p->select);
+
+#undef HELD
+
+  return down;
+}
+
 static uint8_t map_state_to_gb(const hid_gamepad_map_t *map, const hid_gamepad_state_t *state) {
   const pad_profile_t *p = s_profile;
   const uint32_t b = state->buttons;
@@ -245,6 +260,9 @@ static uint8_t map_state_to_gb(const hid_gamepad_map_t *map, const hid_gamepad_s
 
   if (menu_now && !s_menu_prev) {
     s_menu_edge = true;
+    // The chord is spent on the menu: its buttons stay swallowed until they are
+    // let go, so Start+Select does not carry on into whatever happens next.
+    s_spend_chord = true;
   }
   s_menu_prev = menu_now;
 
@@ -338,6 +356,18 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
       hid_gamepad_state_t state;
       hid_gamepad_decode(map, param->input.data, param->input.length, &state);
       s_gb_mask = map_state_to_gb(map, &state);
+
+      // Start+Select opened the pause menu, so that press belongs to the menu
+      // and not to the game: without this the buttons reach the game again as
+      // soon as play resumes - and most titles read a held Start as "open the
+      // map". Both are swallowed until they are released, after which the pad
+      // behaves normally again (Start and Select are ordinary menu buttons).
+      if (s_spend_chord) {
+        s_gb_mask &= (uint8_t)~(GB_BTN_START | GB_BTN_SELECT);
+        if (!pad_chord_buttons_down(&state)) {
+          s_spend_chord = false;
+        }
+      }
       break;
     }
 
@@ -347,6 +377,7 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
       s_connected = false;
       s_gb_mask = 0;
       s_menu_edge = false;
+      s_spend_chord = false;
       s_name[0] = '\0';
       s_dev = NULL;
       esp_hidh_dev_free(param->close.dev);

@@ -242,6 +242,10 @@ void paperboy_gb_set_buttons(uint8_t pressed_mask) {
   s_gb.direct.joypad = (uint8_t)(~pressed_mask);
 }
 
+// The buttons the core is currently being fed, for diagnostics: this is after
+// the menu chord has been taken out, so it shows what the game itself sees.
+uint8_t paperboy_gb_buttons(void) { return s_ready ? (uint8_t)~s_gb.direct.joypad : 0; }
+
 bool paperboy_gb_run_frame(bool skip_render, int *dirty_g0, int *dirty_g1) {
   // The two interpreters are separate compilations of the same core, so the
   // runner follows the machine's mode rather than the session's preference:

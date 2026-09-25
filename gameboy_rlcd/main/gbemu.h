@@ -30,6 +30,10 @@ bool paperboy_gb_is_cgb(void);
 
 void paperboy_gb_set_buttons(uint8_t pressed_mask);
 
+// The buttons the core is currently being fed, after the menu chord has been
+// consumed. For diagnostics.
+uint8_t paperboy_gb_buttons(void);
+
 // Run one Game Boy frame, blitting changed scanlines into the shared
 // framebuffer. dirty_g0/dirty_g1 receive the panel column-group range that
 // changed, or g1 < g0 when nothing did.

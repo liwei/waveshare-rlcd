@@ -101,8 +101,15 @@ otherwise widen a small sprite update into a full-screen repaint once a second.
 
 Menus are always navigable with the two physical buttons, so the device is never
 locked out if a gamepad is absent or unpaired. While both buttons are held down
-their individual meanings are suppressed, so reaching the "back" gesture does
+their individual meanings are suppressed, so reaching for the "back" gesture does
 not first step the cursor and activate whatever it lands on.
+
+The chord that opens the pause menu belongs to the menu and not to the game: its
+buttons stay swallowed until they are released, whatever happens in between. So
+resuming does not hand the game a held A+B, or a held Start+Select — which most
+titles read as "open the map", the reason this exists. Swallowing is armed only
+by a chord that actually opened the menu, so holding both buttons during play
+still behaves as A+B and nothing else changes.
 
 ### Pause menu
 
@@ -289,7 +296,7 @@ stops reading cannot stall the emulator.
 | Key | Action |
 | --- | --- |
 | `d` | dump the framebuffer (`FBUF <len>` then hex rows) |
-| `s` | status: state, video mode, Bluetooth, audio engine/volume/ring, heap |
+| `s` | status: state, video mode, Bluetooth, audio engine/volume/ring, heap; `pad` is the gamepad's mask and `buttons` what the emulator core is being fed |
 | `f` | frame timing summary |
 | `F` | time one full-screen repaint, split into repacking and SPI |
 | `x` | frame-skip policy: auto, never, or every other frame |

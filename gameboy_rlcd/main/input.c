@@ -16,6 +16,7 @@ static uint8_t s_prev;
 static uint8_t s_repeat_btn;
 static int64_t s_repeat_next_ms;
 static bool s_chord_fired;
+static bool s_spend_chord;
 static bool s_pause;
 
 static uint8_t physical_buttons(uint8_t raw) {
@@ -49,6 +50,7 @@ uint8_t input_read(void) {
     if (!s_chord_fired && buttons_hold_ms() >= BTN_CHORD_MS) {
       s_chord_fired = true;
       s_pause = true;
+      s_spend_chord = true;
     }
   } else {
     s_chord_fired = false;
@@ -58,7 +60,20 @@ uint8_t input_read(void) {
     s_pause = true;
   }
 
-  return (uint8_t)(physical_buttons(raw) | input_bt_buttons());
+  uint8_t physical = physical_buttons(raw);
+
+  // The chord that opened the menu is spent on it: while either button is still
+  // down it contributes nothing to the game, so resuming does not hand the game
+  // a held A+B. It only ever applies to a chord that actually opened the menu,
+  // so holding both buttons during play still works as A+B.
+  if (s_spend_chord) {
+    physical &= (uint8_t)~(GB_BTN_A | GB_BTN_B);
+    if ((raw & (BTN_KEY | BTN_BOOT)) == 0) {
+      s_spend_chord = false;
+    }
+  }
+
+  return (uint8_t)(physical | input_bt_buttons());
 }
 
 bool input_pause_requested(void) { return s_pause; }
@@ -73,6 +88,11 @@ bool input_pause_requested(void) { return s_pause; }
 static uint8_t menu_buttons(void) {
   const uint8_t raw = buttons_poll();
   uint8_t cur = input_bt_buttons();
+
+  // A chord pressed while a menu is already up is spent on that menu. The
+  // emulator is not running to consume it, so without this it would still be
+  // pending when play resumes and would re-open the pause menu straight away.
+  (void)input_bt_take_menu();
 
   if (raw == (BTN_KEY | BTN_BOOT)) {
     if (buttons_hold_ms() >= BTN_CHORD_MS) {
