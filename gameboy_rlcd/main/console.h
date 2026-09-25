@@ -7,6 +7,7 @@
 //   f  frame timing summary
 //   F  time one full-screen repaint, split into repacking and SPI
 //   x  frame-skip policy: auto, never, or every other frame
+//   i  the pad's button-to-Game-Boy mapping under the profile in force
 //   g  core registers
 //   p  toggle logging of every BLE input report (for unknown pads)
 //   B  start a BLE scan        l  list scan results     c  forget the bond

@@ -32,3 +32,7 @@ const char *input_bt_status_text(void);
 
 // Log every input report that changes, to work out an unknown pad's layout.
 void input_bt_set_verbose(bool on);
+
+// Which Game Boy button a pad button maps to under the profile in force:
+// 0 A, 1 B, 2 X, 3 Y, 4 LB, 5 RB. Works with no pad connected.
+uint8_t input_bt_map_probe(int which);

@@ -97,7 +97,7 @@ otherwise widen a small sprite update into a full-screen repaint once a second.
 | BOOT | Game Boy **B** |
 | Hold both ~0.8 s | open the pause menu |
 | In menus | KEY steps through the entries (wrapping at the end), BOOT picks one and leaves the cursor there, hold both ~0.8 s to go back a level |
-| Gamepad | D-pad or left stick → D-pad; A/Y → A; B/X → B; LB/RB → B/A; Select → Select; Start → Start; **Start+Select together → pause menu** |
+| Gamepad | D-pad or left stick → D-pad; A/Y → **B**; B/X → **A**; LB/RB → B/A; Select → Select; Start → Start; **Start+Select together → pause menu** |
 
 Menus are always navigable with the two physical buttons, so the device is never
 locked out if a gamepad is absent or unpaired. While both buttons are held down
@@ -190,10 +190,13 @@ reports, falling back to the Xbox layout:
 | Amazon Fire TV (`1949:0402`, i.e. the Q36 in Android mode) | 0 | 1 | 3 | 4 | 6 | 7 | 11 | 10 |
 | Xbox (`045e:02fd`), default | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
 
-`Y` doubles as A and `X` as B, so pads whose face buttons are labelled
-differently still play. Pads that present the D-pad as a hat switch, as buttons,
-or only as a left stick are all handled. `console` command `p` logs every input
-report that changes, which is how an unknown pad's layout gets worked out.
+The face buttons deliberately drive the opposite Game Boy button to their own
+label: A and Y act as B, B and X act as A. The pairs are what matters, so pads
+whose face buttons are labelled differently still play. Pads that present the
+D-pad as a hat switch, as buttons, or only as a left stick are all handled.
+`console` command `i` prints the mapping the active profile produces, and `p`
+logs every input report that changes, which is how an unknown pad's layout gets
+worked out.
 
 The Q36's remaining button indices (2, 5, 8, 9, 12-15) were never observed, so
 its profile claims no guide button and the menu is opened with **Start+Select**,
@@ -290,6 +293,7 @@ stops reading cannot stall the emulator.
 | `f` | frame timing summary |
 | `F` | time one full-screen repaint, split into repacking and SPI |
 | `x` | frame-skip policy: auto, never, or every other frame |
+| `i` | the pad's button-to-Game-Boy mapping under the profile in force |
 | `g` | core registers (PC, LCDC, LY, interrupt state, tile-map base) |
 | `k` / `u` | press / release KEY (`b` for BOOT, `n` for both, `N` to hand control back to the pins) |
 | `B` / `l` / `c` | start a BLE scan / list scan results / forget the bond |

@@ -167,11 +167,15 @@ static uint8_t map_state_to_gb(const hid_gamepad_map_t *map, const hid_gamepad_s
 
 #define PRESSED(idx) ((idx) >= 0 && ((b >> (idx)) & 1u))
 
+  // The face buttons drive the opposite Game Boy button to the one they are
+  // labelled with: the pad's A and Y act as B, its B and X as A. That is the
+  // requested mapping for this device - it suits the pads used here better than
+  // the labels do. LB and RB keep the roles they had (LB as B, RB as A).
   if (PRESSED(p->a) || PRESSED(p->y)) {
-    mask |= GB_BTN_A;
+    mask |= GB_BTN_B;
   }
   if (PRESSED(p->b) || PRESSED(p->x)) {
-    mask |= GB_BTN_B;
+    mask |= GB_BTN_A;
   }
   if (PRESSED(p->lb)) {
     mask |= GB_BTN_B;
@@ -493,8 +497,52 @@ const char *input_bt_status_text(void) {
 /* ------------------------------------------------------------------ input */
 
 uint8_t input_bt_buttons(void) { return s_connected ? s_gb_mask : 0; }
-
 bool input_bt_connected(void) { return s_connected; }
+
+// Which Game Boy button a given pad button produces under the profile in force,
+// so a mapping can be checked without the pad to hand. `which` is 0 A, 1 B, 2 X,
+// 3 Y, 4 LB, 5 RB; unmapped buttons report 0.
+uint8_t input_bt_map_probe(int which) {
+  const pad_profile_t *p = s_profile;
+  int8_t index;
+
+  switch (which) {
+    case 0:
+      index = p->a;
+      break;
+    case 1:
+      index = p->b;
+      break;
+    case 2:
+      index = p->x;
+      break;
+    case 3:
+      index = p->y;
+      break;
+    case 4:
+      index = p->lb;
+      break;
+    case 5:
+      index = p->rb;
+      break;
+    default:
+      return 0;
+  }
+
+  if (index < 0) {
+    return 0;
+  }
+
+  hid_gamepad_map_t map;
+  hid_gamepad_state_t state;
+
+  memset(&map, 0, sizeof(map));
+  memset(&state, 0, sizeof(state));
+  state.hat = -1;
+  state.buttons = 1u << index;
+
+  return map_state_to_gb(&map, &state);
+}
 
 bool input_bt_take_menu(void) {
   const bool edge = s_menu_edge;

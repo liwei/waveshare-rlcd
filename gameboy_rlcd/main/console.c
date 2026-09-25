@@ -205,6 +205,16 @@ void console_poll(void) {
         input_bt_forget();
         write_str("bond forgotten\n");
         break;
+      case 'i': {
+        static const char *const names[] = {"A", "B", "X", "Y", "LB", "RB"};
+        write_fmt("pad map (%s):\n", input_bt_connected() ? input_bt_name() : "no pad, default");
+        for (int i = 0; i < (int)(sizeof(names) / sizeof(names[0])); i++) {
+          const uint8_t gb = input_bt_map_probe(i);
+          write_fmt("  pad %-2s -> gb 0x%02x (%s%s)\n", names[i], gb, (gb & GB_BTN_A) ? "A" : "",
+                    (gb & GB_BTN_B) ? "B" : "");
+        }
+        break;
+      }
       case 'x':
         s_frame_skip = (s_frame_skip + 1) % 3;
         write_fmt("frame skip: %s\n", s_frame_skip == FRAME_SKIP_AUTO      ? "auto"
