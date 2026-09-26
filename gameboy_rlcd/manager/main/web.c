@@ -7,6 +7,7 @@
 // delete files.
 #include "web.h"
 
+#include <stdarg.h>
 #include <string.h>
 
 #include "esp_event.h"
@@ -167,6 +168,22 @@ static esp_err_t page_get(httpd_req_t *req) {
 /* ------------------------------------------------------------------ api --- */
 
 #define API_ROMS "/api/roms/"
+
+// snprintf into a growing buffer, stopping rather than wrapping when it is full.
+static void append(char *body, size_t cap, size_t *used, const char *format, ...) {
+  if (*used >= cap) {
+    return;
+  }
+
+  va_list args;
+  va_start(args, format);
+  const int written = vsnprintf(body + *used, cap - *used, format, args);
+  va_end(args);
+
+  if (written > 0) {
+    *used += ((size_t)written < cap - *used) ? (size_t)written : (cap - *used - 1);
+  }
+}
 #define UPLOAD_CHUNK (8 * 1024)
 
 static int hex_digit(char c) {
@@ -241,15 +258,18 @@ static esp_err_t roms_get(httpd_req_t *req) {
     return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no memory");
   }
 
+  // Appended with a helper that refuses to run off the end: a JSON body built
+  // with `cap - n` arithmetic underflows the moment n reaches cap, and the
+  // result of that is a wild pointer rather than a short string.
   size_t n = 0;
-  n += (size_t)snprintf(body + n, cap - n, "{\"total\":%llu,\"free\":%llu,\"roms\":[",
-                        (unsigned long long)total, (unsigned long long)free_bytes);
+  append(body, cap, &n, "{\"total\":%llu,\"free\":%llu,\"roms\":[", (unsigned long long)total,
+         (unsigned long long)free_bytes);
   for (int i = 0; i < count; i++) {
-    n += (size_t)snprintf(body + n, cap - n, "%s{\"name\":\"%s\",\"size\":%llu,\"save\":%s}",
-                          (i > 0) ? "," : "", entries[i].name,
-                          (unsigned long long)entries[i].size, entries[i].save ? "true" : "false");
+    append(body, cap, &n, "%s{\"name\":\"%s\",\"size\":%llu,\"save\":%s}",
+           (i > 0) ? "," : "", entries[i].name, (unsigned long long)entries[i].size,
+           entries[i].save ? "true" : "false");
   }
-  n += (size_t)snprintf(body + n, cap - n, "]}");
+  append(body, cap, &n, "]}");
 
   httpd_resp_set_type(req, "application/json");
   const esp_err_t err = httpd_resp_send(req, body, (ssize_t)n);
@@ -370,11 +390,17 @@ bool web_start(void) {
   }
 
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-  // The default 4 KB is not enough for the directory walk behind /api/roms, and
-  // this task's stack comes out of the internal RAM that is already tight.
-  config.stack_size = 5120;
+  // The directory walk behind /api/roms uses several half-kilobyte path buffers
+  // plus whatever FATFS needs underneath, and it runs on this task. 5 KB was not
+  // enough and the device reset when a browser asked for the listing; this app
+  // has the internal RAM to be generous with.
+  config.stack_size = 12288;
   config.max_uri_handlers = 8;
   config.lru_purge_enable = true;
+  // The file name travels in the URI, so /api/roms/* has to be a prefix match.
+  // Without this the server compares the URI literally, asterisk and all, and
+  // every upload and delete comes back 404.
+  config.uri_match_fn = httpd_uri_match_wildcard;
   // A phone uploading a 4 MB ROM pauses; the default 5 s gives up on it.
   config.recv_wait_timeout = 30;
 

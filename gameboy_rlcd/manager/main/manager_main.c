@@ -28,15 +28,37 @@
 #include "st7305.h"
 #include "storage_sd.h"
 #include "web.h"
+#include "wifiqr.h"
 
 static const char *TAG = "manager";
 
 // One line of the screen, at the same 12-pixel size the emulator's menus use.
 // The row is filled first, so an inverted one reads as a bar rather than as text
-// with gaps around it.
-static void row(int index, const char *text, bool text_ink, bool bg_ink) {
-  fb_fill_rect(0, index * 16, LCD_W, 16, bg_ink);
+// with gaps around it. `width` keeps the upper rows clear of the QR code.
+static void row(int index, const char *text, int width, bool text_ink, bool bg_ink) {
+  fb_fill_rect(0, index * 16, width, 16, bg_ink);
   fb_text(6, index * 16, text, 2, text_ink, bg_ink);
+}
+
+// The join code, five pixels per module with a two-module quiet zone, which is
+// what a phone camera needs at arm's length. Scanning it offers to join the
+// network, so nobody has to type the passphrase on a phone keyboard.
+#define QR_MODULE_PX 5
+#define QR_QUIET 2
+#define QR_SPAN ((WIFIQR_SIZE + 2 * QR_QUIET) * QR_MODULE_PX)
+#define QR_TEXT_WIDTH (LCD_W - QR_SPAN - 12)
+
+static void draw_wifi_qr(int x0, int y0) {
+  fb_fill_rect(x0, y0, QR_SPAN, QR_SPAN, false);
+
+  for (int line = 0; line < WIFIQR_SIZE; line++) {
+    for (int col = 0; col < WIFIQR_SIZE; col++) {
+      if ((kWifiQr[line] >> (WIFIQR_SIZE - 1 - col)) & 1u) {
+        fb_fill_rect(x0 + (col + QR_QUIET) * QR_MODULE_PX,
+                     y0 + (line + QR_QUIET) * QR_MODULE_PX, QR_MODULE_PX, QR_MODULE_PX, true);
+      }
+    }
+  }
 }
 
 static void bytes_text(uint64_t bytes, char *out, size_t out_size) {
@@ -83,7 +105,7 @@ void app_main(void) {
   buttons_init();
 
   fb_clear(false);
-  row(6, "Starting up", true, false);
+  row(6, "Starting up", LCD_W, true, false);
   rlcd_flush_all(fb_buffer());
 
   const bool have_sd = storage_sd_mount();
@@ -120,18 +142,19 @@ void app_main(void) {
     }
 
     fb_clear(false);
-    row(0, "ROM MANAGER", true, false);
+    draw_wifi_qr(LCD_W - QR_SPAN - 6, 4);
+    row(0, "ROM MANAGER", QR_TEXT_WIDTH, true, false);
     if (serving) {
-      row(3, "Join WiFi", false, true);
-      row(4, web_ssid(), false, true);
-      row(6, "Password", false, true);
-      row(7, web_password(), false, true);
-      row(9, "Then open", false, true);
-      row(10, web_ip(), false, true);
+      row(3, "Scan to join", QR_TEXT_WIDTH, false, true);
+      row(4, web_ssid(), QR_TEXT_WIDTH, false, true);
+      row(6, "or type", QR_TEXT_WIDTH, false, true);
+      row(7, web_password(), QR_TEXT_WIDTH, false, true);
+      row(9, "then open", QR_TEXT_WIDTH, false, true);
+      row(10, web_ip(), QR_TEXT_WIDTH, false, true);
     }
-    row(13, summary, true, false);
-    row(14, clients, true, false);
-    row(17, "hold BOTH:back to games", true, false);
+    row(13, summary, LCD_W, true, false);
+    row(14, clients, LCD_W, true, false);
+    row(17, "hold BOTH:back to games", LCD_W, true, false);
     rlcd_flush_all(fb_buffer());
 
     // The card only changes when someone uses the page, so walking it every

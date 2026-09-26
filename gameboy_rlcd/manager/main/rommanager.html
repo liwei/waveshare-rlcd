@@ -134,9 +134,14 @@ function upload(file) {
     });
 
     request.addEventListener("load", () => {
-      statusEl.textContent = request.status === 200
-        ? "Uploaded " + file.name + "."
-        : "Upload refused: " + file.name + ".";
+      if (request.status === 200) {
+        statusEl.textContent = "Uploaded " + file.name + ".";
+      } else {
+        // The device explains itself in the body; showing that beats guessing.
+        const reason = (request.responseText || request.statusText || "").trim();
+        statusEl.textContent =
+          "Upload of " + file.name + " failed: " + request.status + (reason ? " " + reason : "");
+      }
       resolve();
     });
     request.addEventListener("error", () => {
