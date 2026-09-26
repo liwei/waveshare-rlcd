@@ -294,7 +294,15 @@ managing the SD card:
 | Network | `gameboy-rlcd`, WPA2, password `gameboy1234` |
 | Address | <http://192.168.4.1> |
 
-Join that network from a phone or laptop and open the address. The page lists the
+Join that network from a phone or laptop and open the address. The manager's
+screen carries a **QR code** that joins the network in one scan — phones read a
+`WIFI:` code as a join prompt, which saves typing a passphrase on a phone
+keyboard, and the passphrase is printed beside it as a fallback. The code is
+generated from those credentials by `tools/mk_wifiqr.py` and embedded, so
+**re-run that script if the network name or password changes**, or the drawn code
+will still say the old one.
+
+The page lists the
 ROMs with their sizes and whether each has a save, takes uploads by drag-and-drop
 or file picker with a progress bar, and deletes a ROM together with its `.sav` and
 `.state` so nothing is orphaned. An upload appears in the picker straight away,
