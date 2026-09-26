@@ -492,7 +492,8 @@ Everything above has been exercised on the physical board.
 **CGB colour.** See *Video modes* above: the CGB's hardware is emulated, its
 palettes are not, so colour games are drawn as four shades.
 
-Also missing: link cable, USB gamepads, and WiFi.
+Also missing: link cable and USB gamepads. WiFi arrived with the ROM manager,
+which is its own application rather than something the emulator carries.
 
 ## Layout
 
