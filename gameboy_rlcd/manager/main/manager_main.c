@@ -138,7 +138,11 @@ void app_main(void) {
     // tick would be wasted work.
     if (++tick >= 8 && serving) {
       tick = 0;
-      rom_count = rom_files_count();
+      const int found = rom_files_count();
+      if (found != rom_count) {
+        ESP_LOGI(TAG, "card holds %d ROM(s)", found);
+        rom_count = found;
+      }
     }
 
     if (buttons_poll() == (BTN_KEY | BTN_BOOT) && buttons_hold_ms() >= BTN_CHORD_MS) {

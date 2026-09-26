@@ -28,7 +28,6 @@
 #include "profiler.h"
 #include "st7305.h"
 #include "storage_sd.h"
-#include "testrom.h"
 #include "ui.h"
 
 static const char *TAG = "gameboy_rlcd";
@@ -996,12 +995,6 @@ void app_main(void) {
     const ui_rom_pick_result_t pick = ui_rom_picker(
         have_sd ? SD_MOUNT_POINT : NULL, rom_path, sizeof(rom_path), s_cfg.last_rom);
     if (pick == UI_ROM_PICK_NONE) {
-      continue;
-    }
-
-    if (pick == UI_ROM_PICK_BUILTIN) {
-      ui_notice("BUILT-IN", "Test ROM", 0);
-      run_rom(kTestRom, sizeof(kTestRom), NULL, false);
       continue;
     }
 

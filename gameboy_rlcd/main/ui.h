@@ -49,7 +49,6 @@ typedef enum {
   UI_ROM_PICK_NONE = 0,
   UI_ROM_PICK_SELECTED,
   UI_ROM_PICK_LOAD_LAST,
-  UI_ROM_PICK_BUILTIN,
   UI_ROM_PICK_MANAGER, /* the WiFi ROM manager, not a game */
 } ui_rom_pick_result_t;
 

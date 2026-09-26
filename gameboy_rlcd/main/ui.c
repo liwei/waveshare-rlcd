@@ -310,7 +310,7 @@ ui_rom_pick_result_t ui_rom_picker(const char *mount_pt, char *out_path, size_t 
   ESP_LOGI(TAG, "found %d ROM(s) under %s", s_rom_count, mount_pt != NULL ? mount_pt : "(none)");
 
   const int has_last = (last_rom != NULL && last_rom[0] != '\0') ? 1 : 0;
-  const int fixed = 2 + has_last; /* built-in, optional last played, WiFi manager */
+  const int fixed = has_last + 1; /* optional last played, then the WiFi manager */
   const int count = s_rom_count + fixed;
   s_picker_fixed = fixed;
 
@@ -320,11 +320,10 @@ ui_rom_pick_result_t ui_rom_picker(const char *mount_pt, char *out_path, size_t 
     return UI_ROM_PICK_NONE;
   }
 
-  items[0] = "Built-in test ROM";
   if (has_last) {
-    items[1] = "Last played";
+    items[0] = "Last played";
   }
-  items[1 + has_last] = "WiFi ROM manager";
+  items[has_last] = "WiFi ROM manager";
   for (int i = 0; i < s_rom_count; i++) {
     items[i + fixed] = ui_rom_name(i);
   }
@@ -335,13 +334,10 @@ ui_rom_pick_result_t ui_rom_picker(const char *mount_pt, char *out_path, size_t 
   if (chosen < 0) {
     return UI_ROM_PICK_NONE;
   }
-  if (chosen == 0) {
-    return UI_ROM_PICK_BUILTIN;
-  }
-  if (has_last && chosen == 1) {
+  if (has_last && chosen == 0) {
     return UI_ROM_PICK_LOAD_LAST;
   }
-  if (chosen == 1 + has_last) {
+  if (chosen == has_last) {
     return UI_ROM_PICK_MANAGER;
   }
 
