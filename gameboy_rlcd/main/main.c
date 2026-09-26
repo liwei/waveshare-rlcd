@@ -470,7 +470,7 @@ static int capture_pad_button(const char *label) {
     }
     ui_row(9, seen, true, false);
 
-    ui_row(UI_HINT_ROW, "KEY:clear hold both:cancel", true, false);
+    ui_row(UI_HINT_ROW, "KEY:clear hold KEY+BOOT:cancel", true, false);
     ui_status_bar();
     ui_flush();
     console_poll();
@@ -481,13 +481,17 @@ static int capture_pad_button(const char *label) {
       return captured;
     }
 
+    // Clearing is the destructive choice, so it waits out the chord grace
+    // period: a cancel that is a few milliseconds out of step must not wipe the
+    // assignment on its way past.
     const uint8_t raw = buttons_poll();
+    const uint32_t held = buttons_hold_ms();
     if (raw == (BTN_KEY | BTN_BOOT)) {
-      if (buttons_hold_ms() >= BTN_CHORD_MS) {
+      if (held >= BTN_CHORD_MS) {
         input_bt_capture_end();
         return CAPTURE_CANCELLED;
       }
-    } else if (raw & BTN_KEY) {
+    } else if ((raw & BTN_KEY) && held >= BTN_CHORD_GRACE_MS) {
       input_bt_capture_end();
       return CAPTURE_CLEARED;
     }

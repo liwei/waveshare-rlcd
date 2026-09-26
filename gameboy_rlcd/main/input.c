@@ -94,10 +94,20 @@ static uint8_t menu_buttons(void) {
   // pending when play resumes and would re-open the pause menu straight away.
   (void)input_bt_take_menu();
 
+  const uint32_t held = buttons_hold_ms();
+
   if (raw == (BTN_KEY | BTN_BOOT)) {
-    if (buttons_hold_ms() >= BTN_CHORD_MS) {
+    if (held >= BTN_CHORD_MS) {
       cur |= GB_BTN_B;
     }
+    return cur;
+  }
+
+  // Give the other button a chance to arrive before this one acts alone: the
+  // individual meanings are "step" and "activate", so a chord that is a little
+  // out of step would otherwise walk the cursor and open whatever it landed on
+  // instead of going back.
+  if (raw != 0 && held < BTN_CHORD_GRACE_MS) {
     return cur;
   }
 

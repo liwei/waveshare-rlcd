@@ -182,7 +182,9 @@ int ui_menu(const char *title, const char *const *items, int count, int initial,
         ui_row(UI_SCROLL_DOWN_ROW, ind, true, false);
       }
 
-      ui_row(UI_HINT_ROW, "KEY:next BOOT:select hold:back", true, false);
+      // Names the buttons for the hold gesture: "hold:back" left people guessing
+      // which of the two to hold, and holding the wrong one steps or activates.
+      ui_row(UI_HINT_ROW, "KEY:next BOOT:go hold BOTH:back", true, false);
       ui_status_bar();
       ui_flush();
     }

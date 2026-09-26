@@ -52,6 +52,12 @@
 #define BTN_BOOT_PIN 0
 #define BTN_CHORD_MS 800
 
+// Two buttons pressed "together" are never pressed in the same poll. For this
+// long after one goes down the other may still join it, so a chord that is a few
+// tens of milliseconds out is still a chord rather than the first button's own
+// meaning - which on some screens is destructive.
+#define BTN_CHORD_GRACE_MS 60
+
 // ---- Battery: ADC1 channel 3 = GPIO4 behind a 100k/200k divider -----------
 #define BATTERY_ADC_UNIT ADC_UNIT_1
 #define BATTERY_ADC_CHANNEL ADC_CHANNEL_3
