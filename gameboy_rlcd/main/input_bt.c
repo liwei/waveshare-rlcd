@@ -37,9 +37,9 @@ static bool s_spend_chord;
 // Learning a button: the next one pressed becomes the answer, and until that
 // happens the pad drives nothing at all.
 static volatile bool s_capture;
-static volatile bool s_capture_resync;
 static volatile int s_capture_result;
-static uint32_t s_capture_prev;
+static uint32_t s_capture_prev;   /* last button word, the baseline for "new" */
+static volatile uint32_t s_live_buttons; /* what the pad last reported */
 static volatile bool s_swallow_buttons;
 static volatile bool s_has_hat; /* the pad reports its D-pad as a hat switch */
 static volatile bool s_connected;
@@ -246,7 +246,6 @@ static bool pad_chord_buttons_down(const hid_gamepad_state_t *state) {
 }
 
 static uint8_t map_state_to_gb(const hid_gamepad_map_t *map, const hid_gamepad_state_t *state) {
-  const pad_profile_t *p = s_profile;
   const uint32_t b = state->buttons;
   uint8_t mask = 0;
 
@@ -444,21 +443,22 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
       hid_gamepad_decode(map, param->input.data, param->input.length, &state);
 
       if (s_capture) {
-        // The first report only sets the baseline, so a button already held when
-        // the screen opened is not mistaken for the one being pressed now.
-        if (s_capture_resync) {
-          s_capture_prev = state.buttons;
-          s_capture_resync = false;
-        } else {
-          const uint32_t fresh = state.buttons & ~s_capture_prev;
-          s_capture_prev = state.buttons;
-          if (fresh != 0 && s_capture_result < 0) {
-            s_capture_result = __builtin_ctz(fresh);
-          }
+        // Compare against the last report seen, not against the first one to
+        // arrive after the screen opened: a BLE pad says nothing until something
+        // changes, so that first report is the press itself and using it as the
+        // baseline ate it.
+        const uint32_t fresh = state.buttons & ~s_capture_prev;
+        s_capture_prev = state.buttons;
+        s_live_buttons = state.buttons;
+        if (fresh != 0 && s_capture_result < 0) {
+          s_capture_result = __builtin_ctz(fresh);
         }
         s_gb_mask = 0;
         break;
       }
+
+      s_live_buttons = state.buttons;
+      s_capture_prev = state.buttons;
 
       s_gb_mask = map_state_to_gb(map, &state);
 
@@ -751,7 +751,6 @@ bool input_bt_identity(uint16_t *vid, uint16_t *pid) {
 
 void input_bt_capture_begin(void) {
   s_capture_result = -1;
-  s_capture_resync = true;
   s_capture = true;
 }
 
@@ -768,6 +767,8 @@ void input_bt_capture_end(void) {
   s_gb_mask = 0;
   s_swallow_buttons = true;
 }
+
+uint32_t input_bt_live_buttons(void) { return s_live_buttons; }
 
 bool input_bt_take_menu(void) {
   const bool edge = s_menu_edge;

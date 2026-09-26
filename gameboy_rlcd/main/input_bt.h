@@ -87,3 +87,7 @@ bool input_bt_identity(uint16_t *vid, uint16_t *pid);
 void input_bt_capture_begin(void);
 int input_bt_capture_take(void); /* -1 until a button is pressed, then its index */
 void input_bt_capture_end(void);
+
+// The pad's buttons as of its last report. While the capture screen is up this
+// is what makes it visible whether the pad is saying anything at all.
+uint32_t input_bt_live_buttons(void);

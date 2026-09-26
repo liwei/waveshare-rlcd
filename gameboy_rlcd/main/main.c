@@ -445,9 +445,11 @@ static void mapping_badge(int index, char *out, size_t out_size) {
 #define CAPTURE_CLEARED (-2)
 
 // Waits for a pad button to be pressed, and answers with its index - or one of
-// the two codes above if the player clears the binding or gives up.
+// the two codes above if the player clears the binding or gives up. The timeout
+// only exists so a screen cannot trap the device; it is long enough to read the
+// screen and try more than one button.
 static int capture_pad_button(const char *label) {
-  const int64_t deadline = esp_timer_get_time() + 15 * 1000000;
+  const int64_t deadline = esp_timer_get_time() + 60 * 1000000;
 
   input_bt_capture_begin();
 
@@ -456,6 +458,18 @@ static int capture_pad_button(const char *label) {
     ui_row(UI_TITLE_ROW, "KEY MAPPING", false, true);
     ui_row(3, label, false, true);
     ui_row(6, "Press the pad button to use", true, false);
+
+    // Show what the pad is saying, so a pad that is not being heard looks
+    // different from one whose button is simply not the one expected.
+    const uint32_t live = input_bt_live_buttons();
+    char seen[32];
+    if (live != 0) {
+      snprintf(seen, sizeof(seen), "Pad: %.24s", input_bt_index_name(__builtin_ctz(live)));
+    } else {
+      snprintf(seen, sizeof(seen), "Pad: -");
+    }
+    ui_row(9, seen, true, false);
+
     ui_row(UI_HINT_ROW, "KEY:clear hold both:cancel", true, false);
     ui_status_bar();
     ui_flush();
