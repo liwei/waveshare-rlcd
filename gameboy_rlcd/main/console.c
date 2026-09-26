@@ -21,6 +21,7 @@
 #include "minigb_apu/minigb_apu.h"
 #include "st7305.h"
 #include "ui.h"
+#include "web.h"
 
 static const char *TAG = "console";
 
@@ -219,6 +220,14 @@ void console_poll(void) {
         next_index = (next_index + 1) % 16;
         break;
       }
+      case 'w':
+        if (web_running()) {
+          web_stop();
+          write_str("rom manager stopped\n");
+        } else {
+          write_fmt("rom manager: %s\n", web_start() ? "started, 192.168.4.1" : "failed");
+        }
+        break;
       case 'v': {
         size_t len = 0;
         const uint8_t *desc = input_bt_descriptor(&len);

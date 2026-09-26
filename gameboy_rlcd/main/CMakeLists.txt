@@ -11,6 +11,8 @@ idf_component_register(
         "buttons.c"
         "battery.c"
         "storage_sd.c"
+        "rom_files.c"
+        "web.c"
         "gbemu.c"
         "audio.c"
         "audio_i2s.c"
@@ -20,10 +22,10 @@ idf_component_register(
     INCLUDE_DIRS "." "crankboy_core" "minigb_apu"
     REQUIRES esp_driver_gpio esp_driver_spi esp_driver_sdmmc esp_driver_usb_serial_jtag
              esp_timer esp_adc sdmmc fatfs driver nvs_flash codec_board esp_codec_dev
-             esp_hid bt
+             esp_hid bt esp_wifi esp_netif esp_http_server esp_event
     # 16x16 CJK glyph subset for non-ASCII ROM filenames; mapped from flash, so
     # it costs no RAM. Regenerate with tools/mk_cjkfont.py.
-    EMBED_FILES "cjkfont.bin"
+    EMBED_FILES "cjkfont.bin" "rommanager.html"
 )
 
 # 16-bit signed samples, so minigb_apu matches what the codec is fed.

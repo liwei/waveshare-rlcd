@@ -3,8 +3,24 @@
 #include <string.h>
 
 #include "config.h"
+#include "esp_heap_caps.h"
 
-static uint8_t s_fb[LCD_FB_SIZE];
+// The framebuffer is only ever touched by the CPU: the panel flush repacks it
+// into the stage buffer, and that is what the SPI DMA reads. So it can live in
+// PSRAM, which is where the room for WiFi has to come from - the DMA-capable
+// internal pool has nothing spare.
+static uint8_t *s_fb;
+
+static uint8_t *fb_storage(void) {
+  if (s_fb == NULL) {
+    s_fb = heap_caps_calloc(LCD_FB_SIZE, 1, MALLOC_CAP_SPIRAM);
+    if (s_fb == NULL) {
+      // Better a slower panel than no panel, if PSRAM is ever unavailable.
+      s_fb = heap_caps_calloc(LCD_FB_SIZE, 1, MALLOC_CAP_INTERNAL);
+    }
+  }
+  return s_fb;
+}
 
 /* 5x7 bitmap font covering ASCII 0x20..0x7E, one byte per column with bit 0 at
  * the top. Classic Nokia 5110 / Adafruit LCD font, public domain, carried over
@@ -107,7 +123,7 @@ static const uint8_t s_font5x7[95][5] = {
     {0x08, 0x04, 0x08, 0x10, 0x08}, /* 0x7E '~'  */
 };
 
-uint8_t *fb_buffer(void) { return s_fb; }
+uint8_t *fb_buffer(void) { return fb_storage(); }
 
 /* ── CJK glyphs ────────────────────────────────────────────────────────────
  *
@@ -162,14 +178,14 @@ uint8_t *fb_row(int y) {
   if (y < 0 || y >= LCD_H) {
     return NULL;
   }
-  return &s_fb[y * LCD_STRIDE];
+  return &fb_storage()[y * LCD_STRIDE];
 }
 
 void fb_pixel(int x, int y, bool ink) {
   if (x < 0 || x >= LCD_W || y < 0 || y >= LCD_H) {
     return;
   }
-  uint8_t *p = &s_fb[y * LCD_STRIDE + (x >> 3)];
+  uint8_t *p = &fb_storage()[y * LCD_STRIDE + (x >> 3)];
   const uint8_t mask = (uint8_t)(0x80u >> (x & 7));
   if (ink) {
     *p &= (uint8_t)~mask;
@@ -182,11 +198,11 @@ bool fb_pixel_get(int x, int y) {
   if (x < 0 || x >= LCD_W || y < 0 || y >= LCD_H) {
     return false;
   }
-  return (s_fb[y * LCD_STRIDE + (x >> 3)] & (0x80u >> (x & 7))) == 0;
+  return (fb_storage()[y * LCD_STRIDE + (x >> 3)] & (0x80u >> (x & 7))) == 0;
 }
 
 void fb_clear(bool ink) {
-  memset(s_fb, ink ? 0x00 : 0xFF, sizeof(s_fb));
+  memset(fb_storage(), ink ? 0x00 : 0xFF, LCD_FB_SIZE);
 }
 
 void fb_fill_rect(int x, int y, int w, int h, bool ink) {

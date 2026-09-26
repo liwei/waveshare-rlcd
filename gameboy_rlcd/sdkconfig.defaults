@@ -52,6 +52,25 @@ CONFIG_FATFS_API_ENCODING_UTF_8=y
 # building for speed brings it back under.
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 
+# ---- WiFi ROM manager -----------------------------------------------------
+# WiFi, LWIP and the HTTP server all want RAM, and the emulator plus Bluetooth
+# already hold most of the internal kind. Their heaps go to PSRAM where they can.
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+#
+# The catch: that option also raises the static RX buffer default from 10 to 16,
+# and those buffers are DMA-capable, so they must be internal - 26 KB of a pool
+# that has less than that to give, which is how esp_wifi_init failed with
+# ESP_ERR_NO_MEM while every heap figure looked healthy. An access point serving
+# one phone at a time needs far fewer, so ask for fewer explicitly.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=8
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=8
+# The block-ack window cannot exceed the buffers above.
+CONFIG_ESP_WIFI_RX_BA_WIN=6
+# Per-station TX aggregation buffers are not worth their RAM here; the upload is
+# the only traffic that matters and that is inbound.
+CONFIG_ESP_WIFI_AMPDU_TX_ENABLED=n
+
 # ---- Watchdog ------------------------------------------------------------
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
 

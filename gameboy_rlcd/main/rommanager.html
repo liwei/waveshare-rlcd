@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ROM manager</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0 auto; padding: 1.25rem; max-width: 42rem;
+    font: 16px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  h1 { font-size: 1.15rem; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 .25rem; }
+  #space { margin: 0 0 1rem; opacity: .7; font-size: .85rem; }
+  #drop {
+    border: 2px dashed currentColor; border-radius: .5rem;
+    padding: 1.5rem 1rem; text-align: center; opacity: .8;
+  }
+  #drop.over { opacity: 1; background: rgba(127,127,127,.12); }
+  #drop label { text-decoration: underline; cursor: pointer; }
+  #drop input { display: none; }
+  #progress { height: .5rem; background: rgba(127,127,127,.25); border-radius: .25rem; margin-top: 1rem; overflow: hidden; }
+  #bar { height: 100%; width: 0; background: currentColor; transition: width .15s; }
+  #status { min-height: 1.5rem; font-size: .85rem; opacity: .8; }
+  ul { list-style: none; margin: 1rem 0 0; padding: 0; }
+  li {
+    display: flex; align-items: baseline; gap: .5rem;
+    padding: .5rem 0; border-top: 1px solid rgba(127,127,127,.3);
+  }
+  .name { flex: 1; word-break: break-all; }
+  .meta { font-size: .75rem; opacity: .7; white-space: nowrap; }
+  li.empty { opacity: .6; font-size: .9rem; }
+  button {
+    font: inherit; font-size: .8rem; padding: .15rem .5rem;
+    background: none; color: inherit; border: 1px solid currentColor;
+    border-radius: .25rem; cursor: pointer;
+  }
+  button:hover { background: rgba(127,127,127,.2); }
+</style>
+</head>
+<body>
+<h1>ROM manager</h1>
+<p id="space">reading the card&hellip;</p>
+
+<div id="drop">
+  Drop .gb / .gbc files here, or <label>choose files<input type="file" id="file" multiple accept=".gb,.gbc"></label>
+</div>
+<div id="progress" hidden><div id="bar"></div></div>
+<p id="status"></p>
+<ul id="list"></ul>
+
+<script>
+"use strict";
+
+const listEl = document.getElementById("list");
+const statusEl = document.getElementById("status");
+const spaceEl = document.getElementById("space");
+const dropEl = document.getElementById("drop");
+const barEl = document.getElementById("bar");
+const progressEl = document.getElementById("progress");
+
+function sizeText(bytes) {
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes, unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+  return (unit === 0 ? value : value.toFixed(1)) + " " + units[unit];
+}
+
+async function refresh() {
+  let data;
+  try {
+    const response = await fetch("/api/roms");
+    if (!response.ok) throw new Error(response.status);
+    data = await response.json();
+  } catch (err) {
+    spaceEl.textContent = "";
+    statusEl.textContent = "Could not read the card.";
+    return;
+  }
+
+  spaceEl.textContent = sizeText(data.free) + " free of " + sizeText(data.total);
+  listEl.replaceChildren();
+
+  if (data.roms.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "empty";
+    empty.textContent = "No ROMs on the card.";
+    listEl.append(empty);
+    return;
+  }
+
+  for (const rom of data.roms) {
+    const item = document.createElement("li");
+
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = rom.name;
+
+    const meta = document.createElement("span");
+    meta.className = "meta";
+    meta.textContent = sizeText(rom.size) + (rom.save ? " \u00b7 save" : "");
+
+    const remove = document.createElement("button");
+    remove.textContent = "delete";
+    remove.addEventListener("click", () => removeRom(rom));
+
+    item.append(name, meta, remove);
+    listEl.append(item);
+  }
+}
+
+async function removeRom(rom) {
+  const warning = rom.save ? " Its save and snapshot go too." : "";
+  if (!window.confirm("Delete " + rom.name + "?" + warning)) return;
+
+  try {
+    const response = await fetch("/api/roms/" + encodeURIComponent(rom.name), { method: "DELETE" });
+    statusEl.textContent = response.ok ? "Deleted " + rom.name + "." : "Could not delete " + rom.name + ".";
+  } catch (err) {
+    statusEl.textContent = "Could not delete " + rom.name + ".";
+  }
+  refresh();
+}
+
+function upload(file) {
+  return new Promise((resolve) => {
+    const request = new XMLHttpRequest();
+    request.open("PUT", "/api/roms/" + encodeURIComponent(file.name));
+
+    request.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable) {
+        barEl.style.width = ((100 * event.loaded) / event.total).toFixed(1) + "%";
+      }
+    });
+
+    request.addEventListener("load", () => {
+      statusEl.textContent = request.status === 200
+        ? "Uploaded " + file.name + "."
+        : "Upload refused: " + file.name + ".";
+      resolve();
+    });
+    request.addEventListener("error", () => {
+      statusEl.textContent = "Upload failed: " + file.name + ".";
+      resolve();
+    });
+
+    progressEl.hidden = false;
+    barEl.style.width = "0%";
+    request.send(file);
+  });
+}
+
+async function uploadAll(files) {
+  if (files.length === 0) return;
+  progressEl.hidden = false;
+  for (const file of files) {
+    await upload(file);
+  }
+  progressEl.hidden = true;
+  refresh();
+}
+
+document.getElementById("file").addEventListener("change", (event) => {
+  uploadAll(Array.from(event.target.files));
+  event.target.value = "";
+});
+
+for (const type of ["dragenter", "dragover"]) {
+  dropEl.addEventListener(type, (event) => {
+    event.preventDefault();
+    dropEl.classList.add("over");
+  });
+}
+for (const type of ["dragleave", "drop"]) {
+  dropEl.addEventListener(type, (event) => {
+    event.preventDefault();
+    dropEl.classList.remove("over");
+  });
+}
+dropEl.addEventListener("drop", (event) => uploadAll(Array.from(event.dataTransfer.files)));
+
+refresh();
+</script>
+</body>
+</html>

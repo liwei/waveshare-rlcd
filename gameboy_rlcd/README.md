@@ -283,6 +283,46 @@ The remedy is on the pad — its mode switch, or whichever button combination
 toggles gamepad mode — followed by re-pairing. A power cycle alone does not clear
 it if the mode is stored.
 
+## ROM manager (WiFi)
+
+The ROM picker's **WiFi ROM manager** entry turns the device into its own WiFi
+access point and serves a page for managing the SD card:
+
+| | |
+| --- | --- |
+| Network | `gameboy-rlcd`, WPA2, password `gameboy1234` |
+| Address | <http://192.168.4.1> |
+
+Join that network from a phone or laptop and open the address. The page lists the
+ROMs on the card with their sizes and whether each has a save, takes uploads by
+drag-and-drop or file picker with a progress bar, and deletes a ROM together with
+its `.sav` and `.state` so nothing is orphaned. An upload appears in the picker
+straight away, because the picker rescans every time it opens. Holding both
+buttons leaves the screen.
+
+Worth knowing:
+
+* The device makes its own network rather than joining yours: nothing to store,
+  nothing to configure, and it works with the card out of the device — the
+  situation this exists for. The cost is that you step off your own network while
+  you use it.
+* Nothing is served while a game is running. The access point is started when the
+  screen opens and stopped when it closes, because WiFi and Bluetooth share the
+  radio and the emulator has a frame budget to keep.
+* The WPA2 passphrase is the only gate. The page itself asks for nothing, and it
+  can delete files.
+* Getting WiFi in at all is a RAM problem, not a flash one. `esp_wifi_init` plus
+  the HTTP server want about 73 KB of *internal* RAM, and this build has roughly
+  80 KB spare once Bluetooth and the emulator's buffers are up. Two things made
+  room: the framebuffer moved to PSRAM (only the CPU ever touches it — the panel's
+  DMA reads the stage buffer it is repacked into), and the WiFi buffer pools are
+  trimmed. Note that `CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP`, the obvious way to
+  save internal RAM, actually made this worse: it raises the static RX buffer
+  default from 10 to 16, and those buffers are DMA-capable, so they must be
+  internal. `CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6` sets that back.
+* Leaving the screen calls `esp_wifi_deinit`, so the mode costs nothing for the
+  rest of the session rather than leaving 60 KB of driver resident.
+
 ## Storage, saves and audio
 
 * ROMs come from a FAT32 microSD card, scanned one directory deep from
@@ -376,6 +416,7 @@ stops reading cannot stall the emulator.
 | `i` | the button map: each Game Boy button and the pad button that plays it |
 | `j` | inject a pad button press, cycling through the indices (no pad needed) |
 | `v` | dump the connected pad's HID report descriptor |
+| `w` | start or stop the WiFi ROM manager (same as its picker entry) |
 | `g` | core registers (PC, LCDC, LY, interrupt state, tile-map base) |
 | `k` / `u` | press / release KEY (`b` for BOOT, `n` for both, `N` to hand control back to the pins) |
 | `B` / `l` / `c` | start a BLE scan / list scan results / forget the bond |
