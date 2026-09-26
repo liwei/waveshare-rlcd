@@ -52,7 +52,7 @@ static size_t s_rom_size;
 
 /* ------------------------------------------------------------------ config */
 
-// One <vid>:<pid>:<13 indices> line per pad whose buttons have been re-bound.
+// One <vid>:<pid>:<one index per Game Boy button> line per re-bound pad.
 static bool cfg_parse_padmap(const char *value) {
   if (s_cfg.padmap_count >= PAD_BINDING_MAX) {
     return false;
@@ -73,13 +73,21 @@ static bool cfg_parse_padmap(const char *value) {
   binding->pid = (uint16_t)pid;
 
   const char *cursor = end + 1;
-  for (int field = 0; field < PAD_FIELD_COUNT; field++) {
+  for (int action = 0; action < PAD_ACTION_COUNT; action++) {
     const long index = strtol(cursor, &end, 10);
-    if (end == cursor) {
+    if (end == cursor || index < -1 || index > 31) {
       return false;
     }
-    binding->field[field] = (int8_t)index;
+    binding->index[action] = (int8_t)index;
     cursor = (*end == ',') ? end + 1 : end;
+  }
+
+  // Reject anything that carries more values than this model has. The set of
+  // Game Boy buttons has changed once already, and silently reading the first
+  // few values of a longer line produced a mapping that looked mangled rather
+  // than absent - it is better to fall back to the built-in table.
+  if (*end != '\0') {
+    return false;
   }
 
   s_cfg.padmap_count++;
@@ -112,7 +120,7 @@ static void cfg_load(void) {
       s_cfg.cgb = atoi(line + 4) != 0;
     } else if (strncmp(line, "padmap=", 7) == 0) {
       if (!cfg_parse_padmap(line + 7)) {
-        ESP_LOGW(TAG, "ignoring malformed padmap: %s", line + 7);
+        ESP_LOGW(TAG, "ignoring a padmap line this build cannot use: %s", line + 7);
       }
     }
   }
@@ -134,8 +142,8 @@ static void cfg_save(void) {
 
   for (int i = 0; i < s_cfg.padmap_count; i++) {
     fprintf(f, "padmap=%04x:%04x:", s_cfg.padmap[i].vid, s_cfg.padmap[i].pid);
-    for (int field = 0; field < PAD_FIELD_COUNT; field++) {
-      fprintf(f, "%s%d", (field > 0) ? "," : "", s_cfg.padmap[i].field[field]);
+    for (int action = 0; action < PAD_ACTION_COUNT; action++) {
+      fprintf(f, "%s%d", (action > 0) ? "," : "", s_cfg.padmap[i].index[action]);
     }
     fputc('\n', f);
   }
@@ -362,18 +370,18 @@ static const esp_hid_scan_result_t *bt_choose_device(esp_hid_scan_result_t **res
 
 /* -------------------------------------------------- gamepad button mapping */
 
-// The pad controls the mapping page offers, plus a reset row. The order matches
-// pad_field_t; the reset row sits past PAD_FIELD_COUNT and has no badge.
-#define MAPPING_RESET_ROW PAD_FIELD_COUNT
+// The page lists the Game Boy's own buttons and asks which pad button plays
+// each. Swapping two of them is a matter of assigning both by hand - there is
+// no mode or profile to reason about.
+#define MAPPING_RESET_ROW PAD_ACTION_COUNT
 
-static const char *const kMappingItems[PAD_FIELD_COUNT + 1] = {
-    "A",     "B",           "X",          "Y",          "LB",          "RB",        "Select",
-    "Start", "Home",        "D-pad up",   "D-pad down", "D-pad left",  "D-pad right",
-    "Reset this pad",
+static const char *const kMappingItems[PAD_ACTION_COUNT + 1] = {
+    "A",       "B",         "Start",     "Select",    "Up",       "Down",
+    "Left",    "Right",     "Menu",      "Reset this pad",
 };
 
-// The stored binding for this pad model. A new one is seeded from what the pad
-// currently uses, so every entry written out is complete.
+// The stored binding for this pad, seeded from what the pad currently uses so
+// every entry written out is complete.
 static pad_binding_t *binding_for_pad(uint16_t vid, uint16_t pid) {
   for (int i = 0; i < s_cfg.padmap_count; i++) {
     if (s_cfg.padmap[i].vid == vid && s_cfg.padmap[i].pid == pid) {
@@ -387,8 +395,8 @@ static pad_binding_t *binding_for_pad(uint16_t vid, uint16_t pid) {
   pad_binding_t *binding = &s_cfg.padmap[s_cfg.padmap_count++];
   binding->vid = vid;
   binding->pid = pid;
-  for (int field = 0; field < PAD_FIELD_COUNT; field++) {
-    binding->field[field] = input_bt_profile_get(field);
+  for (int action = 0; action < PAD_ACTION_COUNT; action++) {
+    binding->index[action] = input_bt_action_get(action);
   }
   return binding;
 }
@@ -406,10 +414,10 @@ static void forget_binding(uint16_t vid, uint16_t pid) {
   }
 }
 
-// Another control already sitting on this button, for the confirmation notice.
-static const char *field_using(const pad_binding_t *binding, int field, int index) {
-  for (int i = 0; i < PAD_FIELD_COUNT; i++) {
-    if (i != field && binding->field[i] == index) {
+// Another Game Boy button already sitting on this pad button, if any.
+static const char *action_using(const pad_binding_t *binding, int action, int index) {
+  for (int i = 0; i < PAD_ACTION_COUNT; i++) {
+    if (i != action && binding->index[i] == index) {
       return kMappingItems[i];
     }
   }
@@ -417,21 +425,19 @@ static const char *field_using(const pad_binding_t *binding, int field, int inde
 }
 
 static void mapping_badge(int index, char *out, size_t out_size) {
-  if (index >= PAD_FIELD_COUNT) {
+  if (index >= PAD_ACTION_COUNT) {
     return;
   }
 
-  const int8_t bound = input_bt_profile_get(index);
-  if (bound < 0) {
-    snprintf(out, out_size, "unmapped");
-    return;
-  }
-
-  const char *effect = input_gb_mask_name(input_bt_map_probe(index));
-  if (effect[0] != '\0') {
-    snprintf(out, out_size, "btn %d > %s", bound, effect);
+  const int8_t bound = input_bt_action_get(index);
+  if (bound >= 0) {
+    snprintf(out, out_size, "%.14s", input_bt_index_name(bound));
+  } else if (index >= PAD_ACTION_UP && index <= PAD_ACTION_RIGHT && input_bt_has_hat()) {
+    // Nothing to assign: this pad sends the D-pad as a hat, which the direction
+    // handling picks up by itself.
+    snprintf(out, out_size, "hat");
   } else {
-    snprintf(out, out_size, "btn %d", bound);
+    snprintf(out, out_size, "not set");
   }
 }
 
@@ -496,7 +502,7 @@ static void menu_key_mapping(void) {
 
   int selection = 0;
   while (true) {
-    const int chosen = ui_menu("KEY MAPPING", kMappingItems, PAD_FIELD_COUNT + 1, selection,
+    const int chosen = ui_menu("KEY MAPPING", kMappingItems, PAD_ACTION_COUNT + 1, selection,
                                mapping_badge);
     if (chosen < 0) {
       return;
@@ -524,15 +530,16 @@ static void menu_key_mapping(void) {
 
     char message[48];
     if (captured == CAPTURE_CLEARED) {
-      binding->field[chosen] = -1;
+      binding->index[chosen] = -1;
       snprintf(message, sizeof(message), "%.24s cleared", kMappingItems[chosen]);
     } else {
-      binding->field[chosen] = (int8_t)captured;
-      const char *clash = field_using(binding, chosen, captured);
+      binding->index[chosen] = (int8_t)captured;
+      const char *clash = action_using(binding, chosen, captured);
       if (clash != NULL) {
-        snprintf(message, sizeof(message), "btn %d, also %.16s", captured, clash);
+        snprintf(message, sizeof(message), "%.12s also on %.12s", kMappingItems[chosen], clash);
       } else {
-        snprintf(message, sizeof(message), "Bound to button %d", captured);
+        snprintf(message, sizeof(message), "%.12s is now %.16s", kMappingItems[chosen],
+                 input_bt_index_name(captured));
       }
     }
 

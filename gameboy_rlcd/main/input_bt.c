@@ -41,6 +41,7 @@ static volatile bool s_capture_resync;
 static volatile int s_capture_result;
 static uint32_t s_capture_prev;
 static volatile bool s_swallow_buttons;
+static volatile bool s_has_hat; /* the pad reports its D-pad as a hat switch */
 static volatile bool s_connected;
 static char s_name[48] = "";
 
@@ -124,57 +125,41 @@ static const pad_profile_t kDefaultProfile = {
 
 static const pad_profile_t *s_profile = &kDefaultProfile;
 
-// The profile a pad is actually played with: the built-in table for its model,
-// with any user binding laid over the top. s_profile points either way, so every
-// consumer of the mapping picks a binding up without knowing it exists.
-static pad_profile_t s_effective;
+// The button each Game Boy button is played with on this pad: the built-in
+// table for the model, with any user binding laid over the top. Everything that
+// reads the mapping reads this, so a binding takes effect without its existence
+// being known about anywhere else.
+static int8_t s_actions[PAD_ACTION_COUNT];
 static pad_binding_t s_bindings[PAD_BINDING_MAX];
 static int s_binding_count;
 
-// pad_profile_t members cannot be indexed, so the field enum is mapped to them
-// here - the one place that knows the correspondence.
-static size_t profile_field_offset(int field) {
-  switch (field) {
-    case PAD_FIELD_A:
-      return offsetof(pad_profile_t, a);
-    case PAD_FIELD_B:
-      return offsetof(pad_profile_t, b);
-    case PAD_FIELD_X:
-      return offsetof(pad_profile_t, x);
-    case PAD_FIELD_Y:
-      return offsetof(pad_profile_t, y);
-    case PAD_FIELD_LB:
-      return offsetof(pad_profile_t, lb);
-    case PAD_FIELD_RB:
-      return offsetof(pad_profile_t, rb);
-    case PAD_FIELD_SELECT:
-      return offsetof(pad_profile_t, select);
-    case PAD_FIELD_START:
-      return offsetof(pad_profile_t, start);
-    case PAD_FIELD_GUIDE:
-      return offsetof(pad_profile_t, guide);
-    case PAD_FIELD_DPAD_UP:
-      return offsetof(pad_profile_t, dpad_up);
-    case PAD_FIELD_DPAD_DOWN:
-      return offsetof(pad_profile_t, dpad_down);
-    case PAD_FIELD_DPAD_LEFT:
-      return offsetof(pad_profile_t, dpad_left);
-    case PAD_FIELD_DPAD_RIGHT:
-      return offsetof(pad_profile_t, dpad_right);
+// The built-in button for an action. This is where the deliberate A/B exchange
+// lives: the pad's A and Y, being the two buttons nearest the right thumb, play
+// the Game Boy's B, and the pad's B and X play its A. Put another way, the
+// mapping is set up to suit the hands rather than the labels, and the mapping
+// page is where anyone who disagrees can say so.
+static int8_t builtin_action(const pad_profile_t *p, int action) {
+  switch (action) {
+    case PAD_ACTION_A:
+      return p->b;
+    case PAD_ACTION_B:
+      return p->a;
+    case PAD_ACTION_START:
+      return p->start;
+    case PAD_ACTION_SELECT:
+      return p->select;
+    case PAD_ACTION_UP:
+      return p->dpad_up;
+    case PAD_ACTION_DOWN:
+      return p->dpad_down;
+    case PAD_ACTION_LEFT:
+      return p->dpad_left;
+    case PAD_ACTION_RIGHT:
+      return p->dpad_right;
+    case PAD_ACTION_MENU:
+      return p->guide;
     default:
-      return (size_t)-1;
-  }
-}
-
-static int8_t profile_get(const pad_profile_t *p, int field) {
-  const size_t offset = profile_field_offset(field);
-  return (offset == (size_t)-1) ? -1 : *(const int8_t *)((const uint8_t *)p + offset);
-}
-
-static void profile_set(pad_profile_t *p, int field, int8_t index) {
-  const size_t offset = profile_field_offset(field);
-  if (offset != (size_t)-1) {
-    *(int8_t *)((uint8_t *)p + offset) = index;
+      return -1;
   }
 }
 
@@ -200,19 +185,21 @@ static int32_t axis_centre(const hid_gamepad_map_t *map) {
   return (map->axis_min + map->axis_max) / 2;
 }
 
-// The profile a pad of this model plays with: the built-in table, then any
-// binding on top of it.
+// Fill in the button each Game Boy button plays with: the built-in table for
+// this model, then any binding on top of it.
 static void set_effective_profile(uint16_t vid, uint16_t pid) {
-  s_effective = *profile_for(vid, pid);
+  s_profile = profile_for(vid, pid);
+
+  for (int action = 0; action < PAD_ACTION_COUNT; action++) {
+    s_actions[action] = builtin_action(s_profile, action);
+  }
 
   const pad_binding_t *binding = binding_for(vid, pid);
   if (binding != NULL) {
-    for (int field = 0; field < PAD_FIELD_COUNT; field++) {
-      profile_set(&s_effective, field, binding->field[field]);
+    for (int action = 0; action < PAD_ACTION_COUNT; action++) {
+      s_actions[action] = binding->index[action];
     }
   }
-
-  s_profile = &s_effective;
 }
 
 static int32_t axis_deadzone(const hid_gamepad_map_t *map) {
@@ -248,18 +235,14 @@ static uint8_t stick_to_dpad(const hid_gamepad_map_t *map, const hid_gamepad_sta
   return mask;
 }
 
-// Are either of the pad's menu-chord buttons still held?
+// Are either of the buttons playing Start or Select still held? Follows the
+// mapping, so re-binding them moves the menu chord with them.
 static bool pad_chord_buttons_down(const hid_gamepad_state_t *state) {
-  const pad_profile_t *p = s_profile;
   const uint32_t b = state->buttons;
+  const int8_t start = s_actions[PAD_ACTION_START];
+  const int8_t select = s_actions[PAD_ACTION_SELECT];
 
-#define HELD(idx) ((idx) >= 0 && ((b >> (idx)) & 1u))
-
-  const bool down = HELD(p->start) || HELD(p->select);
-
-#undef HELD
-
-  return down;
+  return (start >= 0 && ((b >> start) & 1u)) || (select >= 0 && ((b >> select) & 1u));
 }
 
 static uint8_t map_state_to_gb(const hid_gamepad_map_t *map, const hid_gamepad_state_t *state) {
@@ -268,81 +251,88 @@ static uint8_t map_state_to_gb(const hid_gamepad_map_t *map, const hid_gamepad_s
   uint8_t mask = 0;
 
 #define PRESSED(idx) ((idx) >= 0 && ((b >> (idx)) & 1u))
+#define BOUND(action) (s_actions[action] >= 0)
 
-  // The face buttons drive the opposite Game Boy button to the one they are
-  // labelled with: the pad's A and Y act as B, its B and X as A. That is the
-  // requested mapping for this device - it suits the pads used here better than
-  // the labels do. LB and RB keep the roles they had (LB as B, RB as A).
-  if (PRESSED(p->a) || PRESSED(p->y)) {
-    mask |= GB_BTN_B;
-  }
-  if (PRESSED(p->b) || PRESSED(p->x)) {
+  if (PRESSED(s_actions[PAD_ACTION_A])) {
     mask |= GB_BTN_A;
   }
-  if (PRESSED(p->lb)) {
+  if (PRESSED(s_actions[PAD_ACTION_B])) {
     mask |= GB_BTN_B;
   }
-  if (PRESSED(p->rb)) {
-    mask |= GB_BTN_A;
-  }
-  if (PRESSED(p->select)) {
-    mask |= GB_BTN_SELECT;
-  }
-  if (PRESSED(p->start)) {
+  if (PRESSED(s_actions[PAD_ACTION_START])) {
     mask |= GB_BTN_START;
   }
+  if (PRESSED(s_actions[PAD_ACTION_SELECT])) {
+    mask |= GB_BTN_SELECT;
+  }
+
+  // Directions a binding owns outright. Everything else falls through to the
+  // pad's automatic handling below, so a pad that reports its D-pad as a hat
+  // keeps working without any of this being configured, and picking a button
+  // for one direction does not silence the other three.
+  const uint8_t bound_directions =
+      (uint8_t)((BOUND(PAD_ACTION_UP) ? GB_BTN_UP : 0) | (BOUND(PAD_ACTION_DOWN) ? GB_BTN_DOWN : 0) |
+                (BOUND(PAD_ACTION_LEFT) ? GB_BTN_LEFT : 0) |
+                (BOUND(PAD_ACTION_RIGHT) ? GB_BTN_RIGHT : 0));
+
+  if (PRESSED(s_actions[PAD_ACTION_UP])) {
+    mask |= GB_BTN_UP;
+  }
+  if (PRESSED(s_actions[PAD_ACTION_DOWN])) {
+    mask |= GB_BTN_DOWN;
+  }
+  if (PRESSED(s_actions[PAD_ACTION_LEFT])) {
+    mask |= GB_BTN_LEFT;
+  }
+  if (PRESSED(s_actions[PAD_ACTION_RIGHT])) {
+    mask |= GB_BTN_RIGHT;
+  }
+
+  uint8_t automatic = 0;
 
   if (state->hat >= 0) {
     switch (state->hat) {
       case 0:
-        mask |= GB_BTN_UP;
+        automatic |= GB_BTN_UP;
         break;
       case 1:
-        mask |= GB_BTN_UP | GB_BTN_RIGHT;
+        automatic |= GB_BTN_UP | GB_BTN_RIGHT;
         break;
       case 2:
-        mask |= GB_BTN_RIGHT;
+        automatic |= GB_BTN_RIGHT;
         break;
       case 3:
-        mask |= GB_BTN_DOWN | GB_BTN_RIGHT;
+        automatic |= GB_BTN_DOWN | GB_BTN_RIGHT;
         break;
       case 4:
-        mask |= GB_BTN_DOWN;
+        automatic |= GB_BTN_DOWN;
         break;
       case 5:
-        mask |= GB_BTN_DOWN | GB_BTN_LEFT;
+        automatic |= GB_BTN_DOWN | GB_BTN_LEFT;
         break;
       case 6:
-        mask |= GB_BTN_LEFT;
+        automatic |= GB_BTN_LEFT;
         break;
       case 7:
-        mask |= GB_BTN_UP | GB_BTN_LEFT;
+        automatic |= GB_BTN_UP | GB_BTN_LEFT;
         break;
       default:
         break;
     }
-  } else if (p->dpad_up >= 0) {
-    if (PRESSED(p->dpad_up)) {
-      mask |= GB_BTN_UP;
-    }
-    if (PRESSED(p->dpad_down)) {
-      mask |= GB_BTN_DOWN;
-    }
-    if (PRESSED(p->dpad_left)) {
-      mask |= GB_BTN_LEFT;
-    }
-    if (PRESSED(p->dpad_right)) {
-      mask |= GB_BTN_RIGHT;
-    }
   } else {
-    mask |= stick_to_dpad(map, state);
+    automatic |= stick_to_dpad(map, state);
   }
 
-  // The pad's own menu gesture: a guide button when the profile knows one, or
+  mask |= (uint8_t)(automatic & ~bound_directions);
+
+  // The pad's own menu gesture: the Menu button when one is mapped, or
   // Start+Select together, which every pad here has. Edge-detected so holding
   // the buttons opens the menu once rather than re-opening it on every report.
-  const bool menu_now = PRESSED(p->guide) || (PRESSED(p->start) && PRESSED(p->select));
+  const bool menu_now =
+      PRESSED(s_actions[PAD_ACTION_MENU]) ||
+      (PRESSED(s_actions[PAD_ACTION_START]) && PRESSED(s_actions[PAD_ACTION_SELECT]));
 
+#undef BOUND
 #undef PRESSED
 
   if (menu_now && !s_menu_prev) {
@@ -406,6 +396,16 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
 
       if (s_map_count == 0) {
         ESP_LOGW(TAG, "no gamepad reports in the descriptor");
+      }
+
+      // Whether the D-pad arrives as a hat, which decides what a direction that
+      // nobody has bound a button to falls back to.
+      s_has_hat = false;
+      for (int i = 0; i < s_map_count; i++) {
+        if (s_maps[i].has_hat) {
+          s_has_hat = true;
+          break;
+        }
       }
 
       s_connected = true;
@@ -648,7 +648,43 @@ const char *input_bt_status_text(void) {
 uint8_t input_bt_buttons(void) { return s_connected ? s_gb_mask : 0; }
 bool input_bt_connected(void) { return s_connected; }
 
-int8_t input_bt_profile_get(int field) { return profile_get(s_profile, field); }
+int8_t input_bt_action_get(int action) {
+  if (action < 0 || action >= PAD_ACTION_COUNT) {
+    return -1;
+  }
+  return s_actions[action];
+}
+
+const char *input_bt_index_name(int index) {
+  static char unnamed[24];
+  const pad_profile_t *p = s_profile;
+
+  if (index < 0) {
+    return "nothing";
+  }
+
+  // Which of the pad's named buttons sits on this index, per the profile.
+  const struct {
+    int8_t index;
+    const char *name;
+  } names[] = {
+      {p->a, "pad A"},     {p->b, "pad B"},         {p->x, "pad X"},      {p->y, "pad Y"},
+      {p->lb, "LB"},       {p->rb, "RB"},           {p->start, "Start"},  {p->select, "Select"},
+      {p->guide, "Home"},  {p->dpad_up, "d-pad up"}, {p->dpad_down, "d-pad down"},
+      {p->dpad_left, "d-pad left"}, {p->dpad_right, "d-pad right"},
+  };
+
+  for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+    if (names[i].index >= 0 && names[i].index == index) {
+      return names[i].name;
+    }
+  }
+
+  snprintf(unnamed, sizeof(unnamed), "button %d", index);
+  return unnamed;
+}
+
+bool input_bt_has_hat(void) { return s_has_hat; }
 
 void input_bt_binding_set(const pad_binding_t *binding) {
   if (binding == NULL) {
@@ -731,26 +767,6 @@ void input_bt_capture_end(void) {
   s_capture = false;
   s_gb_mask = 0;
   s_swallow_buttons = true;
-}
-
-// Which Game Boy button a given pad button produces under the profile in force,
-// so a mapping can be checked without the pad to hand. `field` is a pad_field_t;
-// unmapped controls report 0.
-uint8_t input_bt_map_probe(int field) {
-  const int8_t index = profile_get(s_profile, field);
-  if (index < 0) {
-    return 0;
-  }
-
-  hid_gamepad_map_t map;
-  hid_gamepad_state_t state;
-
-  memset(&map, 0, sizeof(map));
-  memset(&state, 0, sizeof(state));
-  state.hat = -1;
-  state.buttons = 1u << index;
-
-  return map_state_to_gb(&map, &state);
 }
 
 bool input_bt_take_menu(void) {

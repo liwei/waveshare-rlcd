@@ -206,14 +206,16 @@ void console_poll(void) {
         write_str("bond forgotten\n");
         break;
       case 'i': {
-        static const char *const names[PAD_FIELD_COUNT] = {
-            "A",         "B",          "X",     "Y",         "LB",   "RB", "Select",
-            "Start",     "Home",       "dpad up", "dpad down", "dpad left", "dpad right"};
-        write_fmt("pad map (%s):\n", input_bt_connected() ? input_bt_name() : "no pad, default");
-        for (int i = 0; i < PAD_FIELD_COUNT; i++) {
-          const uint8_t gb = input_bt_map_probe(i);
-          write_fmt("  %-10s idx %3d -> gb 0x%02x %s\n", names[i], input_bt_profile_get(i), gb,
-                    input_gb_mask_name(gb));
+        static const char *const names[PAD_ACTION_COUNT] = {
+            "A", "B", "Start", "Select", "Up", "Down", "Left", "Right", "Menu"};
+        write_fmt("button map (%s):\n", input_bt_connected() ? input_bt_name() : "no pad, default");
+        for (int i = 0; i < PAD_ACTION_COUNT; i++) {
+          const int8_t index = input_bt_action_get(i);
+          if (index < 0) {
+            write_fmt("  %-7s not set\n", names[i]);
+          } else {
+            write_fmt("  %-7s idx %2d  %s\n", names[i], index, input_bt_index_name(index));
+          }
         }
         break;
       }

@@ -27,7 +27,3 @@ const char *input_bt_name(void);
 
 // True once per press of the gamepad's guide button (consumes the edge).
 bool input_bt_take_menu(void);
-
-// A one-line name for what a Game Boy button mask means, for menus and the
-// console. Empty when the mask is empty.
-const char *input_gb_mask_name(uint8_t mask);

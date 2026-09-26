@@ -213,45 +213,55 @@ that has actually been seen to send one.
 ### Button mapping
 
 The table above is only a default. Pause menu → *Bluetooth* → **Button mapping**
-lists the pad's thirteen controls — A, B, X, Y, LB, RB, Select, Start, Home and
-the four D-pad directions — with the raw button index each one uses and the Game
-Boy button it ends up producing:
+lists the Game Boy's own buttons and shows which pad button plays each:
 
 ```
 KEY MAPPING
-  A                   btn 0 > B
-  B                   btn 1 > A
+  A                    Pad B
+  B                    Pad A
+  Start                Start
+  Select               Select
+  Up                   hat
   ...
-  Home                unmapped
-  D-pad up            unmapped
+  Menu                 not set
   Reset this pad
 ```
 
-Select a row and press the pad button you want it to be; the index is learnt
+Select a row and press the pad button you want to play it. The index is learnt
 from the pad itself, so a pad whose buttons report in an unexpected order can be
-corrected without touching the firmware. That is also how an index gets
+corrected without touching the firmware, and that is how an index gets
 established for a pad nobody has seen before.
 
-`Home` is the pad's middle button — the one with a house or Xbox logo. It is
-called `guide` in the code, after the HID usage name, which is not what anybody
-calls it while holding the thing. On the Q36 in Android mode no index has ever
-been observed for it, which is why the platform opens the pause menu with
-Start+Select; binding it from this page is the way to find out whether the pad
-sends it at all.
+The defaults suit the hands rather than the labels: the pad's A plays the Game
+Boy's B and its B plays the Game Boy's A, which is why the first two rows read
+the way they do. Anyone who would rather have the labels agree can assign both
+rows by hand — there is no mode, profile or alias to reason about.
 
-On the capture screen, `KEY` alone clears the binding (leaving that control
-unmapped) and both buttons held cancel; nothing pressed for 15 s returns to the
-list. The buttons that opened the capture stay swallowed until released, so
-binding a D-pad direction does not scroll the page underneath you.
+`Menu` is the pad's middle button, the one with a house or Xbox logo; the HID
+name for it is "guide", which is not what anybody calls it while holding the
+thing. While `Menu` is unset the pause menu still opens by pressing
+**Start+Select** together, so a pad without such a button is not locked out.
 
-Bindings are stored per pad *model* — by the vendor and product ids, the same
+A direction shows `hat` when the pad reports its D-pad as a hat switch: there is
+nothing to assign, because the direction handling picks it up by itself.
+Assigning a button to a direction overrides the hat for that direction only,
+leaving the other three alone.
+
+On the capture screen, `KEY` alone clears the assignment and both buttons held
+cancel; nothing pressed for 15 s returns to the list. The buttons that opened the
+capture stay swallowed until released, so binding a direction cannot walk the
+cursor across the page underneath.
+
+Assignments are stored per pad *model* — by the vendor and product ids, the same
 key the default table uses — as a `padmap=` line in `/sdcard/gameboy.cfg`, and
-are laid over the built-in table rather than replacing it. *Reset this pad*
-drops them and puts the built-in table back in force. The Q36's two modes have
-different ids, so a mapping learnt in one cannot corrupt the other.
+are laid over the built-in table rather than replacing it. A line this build
+cannot read, such as one written when the set of buttons was different, is
+ignored in favour of the built-in table rather than half-applied. *Reset this
+pad* drops the assignment outright. The Q36's two modes have different ids, so a
+mapping learnt in one cannot corrupt the other.
 
-Pads that report only *changed* bytes rather than a whole button field will not
-capture cleanly, since the page compares one decoded report against the last.
+Pads that report only *changed* bytes rather than the whole button field will not
+capture cleanly, since the page compares each decoded report against the last.
 The Q36 sends full reports.
 
 ## Storage, saves and audio
@@ -344,7 +354,7 @@ stops reading cannot stall the emulator.
 | `f` | frame timing summary |
 | `F` | time one full-screen repaint, split into repacking and SPI |
 | `x` | frame-skip policy: auto, never, or every other frame |
-| `i` | the pad's button mapping: each control, the index it uses, and the Game Boy button that comes out |
+| `i` | the button map: each Game Boy button and the pad button that plays it |
 | `g` | core registers (PC, LCDC, LY, interrupt state, tile-map base) |
 | `k` / `u` | press / release KEY (`b` for BOOT, `n` for both, `N` to hand control back to the pins) |
 | `B` / `l` / `c` | start a BLE scan / list scan results / forget the bond |
