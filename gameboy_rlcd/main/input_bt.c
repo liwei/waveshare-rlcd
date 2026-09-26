@@ -4,6 +4,7 @@
 // pad's report descriptor is parsed at connect time, which makes any pad that
 // exposes a standard gamepad collection work without a per-model table.
 #include <stdbool.h>
+#include <stddef.h>
 #include <string.h>
 
 #include "esp_event.h"
@@ -32,6 +33,14 @@ static volatile uint8_t s_gb_mask;
 static volatile bool s_menu_edge;
 static bool s_menu_prev;
 static bool s_spend_chord;
+
+// Learning a button: the next one pressed becomes the answer, and until that
+// happens the pad drives nothing at all.
+static volatile bool s_capture;
+static volatile bool s_capture_resync;
+static volatile int s_capture_result;
+static uint32_t s_capture_prev;
+static volatile bool s_swallow_buttons;
 static volatile bool s_connected;
 static char s_name[48] = "";
 
@@ -115,6 +124,69 @@ static const pad_profile_t kDefaultProfile = {
 
 static const pad_profile_t *s_profile = &kDefaultProfile;
 
+// The profile a pad is actually played with: the built-in table for its model,
+// with any user binding laid over the top. s_profile points either way, so every
+// consumer of the mapping picks a binding up without knowing it exists.
+static pad_profile_t s_effective;
+static pad_binding_t s_bindings[PAD_BINDING_MAX];
+static int s_binding_count;
+
+// pad_profile_t members cannot be indexed, so the field enum is mapped to them
+// here - the one place that knows the correspondence.
+static size_t profile_field_offset(int field) {
+  switch (field) {
+    case PAD_FIELD_A:
+      return offsetof(pad_profile_t, a);
+    case PAD_FIELD_B:
+      return offsetof(pad_profile_t, b);
+    case PAD_FIELD_X:
+      return offsetof(pad_profile_t, x);
+    case PAD_FIELD_Y:
+      return offsetof(pad_profile_t, y);
+    case PAD_FIELD_LB:
+      return offsetof(pad_profile_t, lb);
+    case PAD_FIELD_RB:
+      return offsetof(pad_profile_t, rb);
+    case PAD_FIELD_SELECT:
+      return offsetof(pad_profile_t, select);
+    case PAD_FIELD_START:
+      return offsetof(pad_profile_t, start);
+    case PAD_FIELD_GUIDE:
+      return offsetof(pad_profile_t, guide);
+    case PAD_FIELD_DPAD_UP:
+      return offsetof(pad_profile_t, dpad_up);
+    case PAD_FIELD_DPAD_DOWN:
+      return offsetof(pad_profile_t, dpad_down);
+    case PAD_FIELD_DPAD_LEFT:
+      return offsetof(pad_profile_t, dpad_left);
+    case PAD_FIELD_DPAD_RIGHT:
+      return offsetof(pad_profile_t, dpad_right);
+    default:
+      return (size_t)-1;
+  }
+}
+
+static int8_t profile_get(const pad_profile_t *p, int field) {
+  const size_t offset = profile_field_offset(field);
+  return (offset == (size_t)-1) ? -1 : *(const int8_t *)((const uint8_t *)p + offset);
+}
+
+static void profile_set(pad_profile_t *p, int field, int8_t index) {
+  const size_t offset = profile_field_offset(field);
+  if (offset != (size_t)-1) {
+    *(int8_t *)((uint8_t *)p + offset) = index;
+  }
+}
+
+static const pad_binding_t *binding_for(uint16_t vid, uint16_t pid) {
+  for (int i = 0; i < s_binding_count; i++) {
+    if (s_bindings[i].vid == vid && s_bindings[i].pid == pid) {
+      return &s_bindings[i];
+    }
+  }
+  return NULL;
+}
+
 static const pad_profile_t *profile_for(uint16_t vid, uint16_t pid) {
   for (size_t i = 0; i < sizeof(kProfiles) / sizeof(kProfiles[0]); i++) {
     if (kProfiles[i].vid == vid && kProfiles[i].pid == pid) {
@@ -126,6 +198,21 @@ static const pad_profile_t *profile_for(uint16_t vid, uint16_t pid) {
 
 static int32_t axis_centre(const hid_gamepad_map_t *map) {
   return (map->axis_min + map->axis_max) / 2;
+}
+
+// The profile a pad of this model plays with: the built-in table, then any
+// binding on top of it.
+static void set_effective_profile(uint16_t vid, uint16_t pid) {
+  s_effective = *profile_for(vid, pid);
+
+  const pad_binding_t *binding = binding_for(vid, pid);
+  if (binding != NULL) {
+    for (int field = 0; field < PAD_FIELD_COUNT; field++) {
+      profile_set(&s_effective, field, binding->field[field]);
+    }
+  }
+
+  s_profile = &s_effective;
 }
 
 static int32_t axis_deadzone(const hid_gamepad_map_t *map) {
@@ -289,7 +376,7 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
 
       const uint16_t vid = esp_hidh_dev_vendor_id_get(s_dev);
       const uint16_t pid = esp_hidh_dev_product_id_get(s_dev);
-      s_profile = profile_for(vid, pid);
+      set_effective_profile(vid, pid);
       ESP_LOGI(TAG, "pad %04x:%04x -> %s button map", vid, pid, s_profile->name);
 
       const uint8_t *bda = esp_hidh_dev_bda_get(s_dev);
@@ -355,7 +442,36 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
           hid_gamepad_find(s_maps, s_map_count, (uint16_t)param->input.report_id);
       hid_gamepad_state_t state;
       hid_gamepad_decode(map, param->input.data, param->input.length, &state);
+
+      if (s_capture) {
+        // The first report only sets the baseline, so a button already held when
+        // the screen opened is not mistaken for the one being pressed now.
+        if (s_capture_resync) {
+          s_capture_prev = state.buttons;
+          s_capture_resync = false;
+        } else {
+          const uint32_t fresh = state.buttons & ~s_capture_prev;
+          s_capture_prev = state.buttons;
+          if (fresh != 0 && s_capture_result < 0) {
+            s_capture_result = __builtin_ctz(fresh);
+          }
+        }
+        s_gb_mask = 0;
+        break;
+      }
+
       s_gb_mask = map_state_to_gb(map, &state);
+
+      // After a binding, the player is still holding the button they just used.
+      // Nothing reaches the menu until they let go: a held d-pad would otherwise
+      // scroll the page out from under them.
+      if (s_swallow_buttons) {
+        s_gb_mask = 0;
+        if (state.buttons == 0) {
+          s_swallow_buttons = false;
+        }
+        break;
+      }
 
       // Start+Select opened the pause menu, so that press belongs to the menu
       // and not to the game: without this the buttons reach the game again as
@@ -378,6 +494,8 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
       s_gb_mask = 0;
       s_menu_edge = false;
       s_spend_chord = false;
+      s_capture = false;
+      s_swallow_buttons = false;
       s_name[0] = '\0';
       s_dev = NULL;
       esp_hidh_dev_free(param->close.dev);
@@ -530,36 +648,96 @@ const char *input_bt_status_text(void) {
 uint8_t input_bt_buttons(void) { return s_connected ? s_gb_mask : 0; }
 bool input_bt_connected(void) { return s_connected; }
 
-// Which Game Boy button a given pad button produces under the profile in force,
-// so a mapping can be checked without the pad to hand. `which` is 0 A, 1 B, 2 X,
-// 3 Y, 4 LB, 5 RB; unmapped buttons report 0.
-uint8_t input_bt_map_probe(int which) {
-  const pad_profile_t *p = s_profile;
-  int8_t index;
+int8_t input_bt_profile_get(int field) { return profile_get(s_profile, field); }
 
-  switch (which) {
-    case 0:
-      index = p->a;
-      break;
-    case 1:
-      index = p->b;
-      break;
-    case 2:
-      index = p->x;
-      break;
-    case 3:
-      index = p->y;
-      break;
-    case 4:
-      index = p->lb;
-      break;
-    case 5:
-      index = p->rb;
-      break;
-    default:
-      return 0;
+void input_bt_binding_set(const pad_binding_t *binding) {
+  if (binding == NULL) {
+    return;
   }
 
+  pad_binding_t *slot = NULL;
+  for (int i = 0; i < s_binding_count; i++) {
+    if (s_bindings[i].vid == binding->vid && s_bindings[i].pid == binding->pid) {
+      slot = &s_bindings[i];
+      break;
+    }
+  }
+  if (slot == NULL) {
+    if (s_binding_count >= PAD_BINDING_MAX) {
+      return;
+    }
+    slot = &s_bindings[s_binding_count++];
+  }
+
+  *slot = *binding;
+
+  // If this is the pad being played with, the change takes effect now.
+  uint16_t vid;
+  uint16_t pid;
+  if (input_bt_identity(&vid, &pid) && vid == binding->vid && pid == binding->pid) {
+    set_effective_profile(vid, pid);
+  }
+}
+
+void input_bt_binding_reset(uint16_t vid, uint16_t pid) {
+  for (int i = 0; i < s_binding_count; i++) {
+    if (s_bindings[i].vid != vid || s_bindings[i].pid != pid) {
+      continue;
+    }
+    for (int j = i + 1; j < s_binding_count; j++) {
+      s_bindings[j - 1] = s_bindings[j];
+    }
+    s_binding_count--;
+    break;
+  }
+
+  uint16_t connected_vid;
+  uint16_t connected_pid;
+  if (input_bt_identity(&connected_vid, &connected_pid) && connected_vid == vid &&
+      connected_pid == pid) {
+    set_effective_profile(vid, pid);
+  }
+}
+
+bool input_bt_identity(uint16_t *vid, uint16_t *pid) {
+  if (!s_connected || s_dev == NULL) {
+    return false;
+  }
+
+  if (vid != NULL) {
+    *vid = esp_hidh_dev_vendor_id_get(s_dev);
+  }
+  if (pid != NULL) {
+    *pid = esp_hidh_dev_product_id_get(s_dev);
+  }
+  return true;
+}
+
+void input_bt_capture_begin(void) {
+  s_capture_result = -1;
+  s_capture_resync = true;
+  s_capture = true;
+}
+
+int input_bt_capture_take(void) {
+  const int result = s_capture_result;
+  if (result >= 0) {
+    s_capture_result = -1;
+  }
+  return result;
+}
+
+void input_bt_capture_end(void) {
+  s_capture = false;
+  s_gb_mask = 0;
+  s_swallow_buttons = true;
+}
+
+// Which Game Boy button a given pad button produces under the profile in force,
+// so a mapping can be checked without the pad to hand. `field` is a pad_field_t;
+// unmapped controls report 0.
+uint8_t input_bt_map_probe(int field) {
+  const int8_t index = profile_get(s_profile, field);
   if (index < 0) {
     return 0;
   }

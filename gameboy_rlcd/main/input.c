@@ -78,6 +78,34 @@ uint8_t input_read(void) {
 
 bool input_pause_requested(void) { return s_pause; }
 
+const char *input_gb_mask_name(uint8_t mask) {
+  if (mask & GB_BTN_A) {
+    return "A";
+  }
+  if (mask & GB_BTN_B) {
+    return "B";
+  }
+  if (mask & GB_BTN_START) {
+    return "Start";
+  }
+  if (mask & GB_BTN_SELECT) {
+    return "Select";
+  }
+  if (mask & GB_BTN_UP) {
+    return "Up";
+  }
+  if (mask & GB_BTN_DOWN) {
+    return "Down";
+  }
+  if (mask & GB_BTN_LEFT) {
+    return "Left";
+  }
+  if (mask & GB_BTN_RIGHT) {
+    return "Right";
+  }
+  return "";
+}
+
 // In menus the two physical buttons cover navigation and selection: KEY steps
 // through the entries and BOOT activates them. The list wraps, so any entry is
 // reachable by going round, and holding both goes back up a level — which is

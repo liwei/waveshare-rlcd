@@ -16,6 +16,7 @@
 
 #include "audio.h"
 #include "battery.h"
+#include "buttons.h"
 #include "config.h"
 #include "console.h"
 #include "fb.h"
@@ -40,6 +41,8 @@ typedef struct {
   int audio_engine;
   bool muted;
   bool cgb; /* run colour cartridges on the CGB core instead of as a DMG */
+  pad_binding_t padmap[PAD_BINDING_MAX]; /* button mappings, keyed by pad model */
+  int padmap_count;
 } cfg_t;
 
 static cfg_t s_cfg;
@@ -48,6 +51,40 @@ static uint8_t *s_rom_data;
 static size_t s_rom_size;
 
 /* ------------------------------------------------------------------ config */
+
+// One <vid>:<pid>:<13 indices> line per pad whose buttons have been re-bound.
+static bool cfg_parse_padmap(const char *value) {
+  if (s_cfg.padmap_count >= PAD_BINDING_MAX) {
+    return false;
+  }
+
+  char *end;
+  const unsigned long vid = strtoul(value, &end, 16);
+  if (*end != ':') {
+    return false;
+  }
+  const unsigned long pid = strtoul(end + 1, &end, 16);
+  if (*end != ':') {
+    return false;
+  }
+
+  pad_binding_t *binding = &s_cfg.padmap[s_cfg.padmap_count];
+  binding->vid = (uint16_t)vid;
+  binding->pid = (uint16_t)pid;
+
+  const char *cursor = end + 1;
+  for (int field = 0; field < PAD_FIELD_COUNT; field++) {
+    const long index = strtol(cursor, &end, 10);
+    if (end == cursor) {
+      return false;
+    }
+    binding->field[field] = (int8_t)index;
+    cursor = (*end == ',') ? end + 1 : end;
+  }
+
+  s_cfg.padmap_count++;
+  return true;
+}
 
 static void cfg_load(void) {
   memset(&s_cfg, 0, sizeof(s_cfg));
@@ -73,6 +110,10 @@ static void cfg_load(void) {
       s_cfg.muted = atoi(line + 6) != 0;
     } else if (strncmp(line, "cgb=", 4) == 0) {
       s_cfg.cgb = atoi(line + 4) != 0;
+    } else if (strncmp(line, "padmap=", 7) == 0) {
+      if (!cfg_parse_padmap(line + 7)) {
+        ESP_LOGW(TAG, "ignoring malformed padmap: %s", line + 7);
+      }
     }
   }
   fclose(f);
@@ -90,6 +131,14 @@ static void cfg_save(void) {
   fprintf(f, "audio_engine=%d\n", s_cfg.audio_engine);
   fprintf(f, "muted=%d\n", s_cfg.muted ? 1 : 0);
   fprintf(f, "cgb=%d\n", s_cfg.cgb ? 1 : 0);
+
+  for (int i = 0; i < s_cfg.padmap_count; i++) {
+    fprintf(f, "padmap=%04x:%04x:", s_cfg.padmap[i].vid, s_cfg.padmap[i].pid);
+    for (int field = 0; field < PAD_FIELD_COUNT; field++) {
+      fprintf(f, "%s%d", (field > 0) ? "," : "", s_cfg.padmap[i].field[field]);
+    }
+    fputc('\n', f);
+  }
   fclose(f);
 }
 
@@ -311,10 +360,193 @@ static const esp_hid_scan_result_t *bt_choose_device(esp_hid_scan_result_t **res
   return picked;
 }
 
+/* -------------------------------------------------- gamepad button mapping */
+
+// The pad controls the mapping page offers, plus a reset row. The order matches
+// pad_field_t; the reset row sits past PAD_FIELD_COUNT and has no badge.
+#define MAPPING_RESET_ROW PAD_FIELD_COUNT
+
+static const char *const kMappingItems[PAD_FIELD_COUNT + 1] = {
+    "A",     "B",           "X",          "Y",          "LB",          "RB",        "Select",
+    "Start", "Home",        "D-pad up",   "D-pad down", "D-pad left",  "D-pad right",
+    "Reset this pad",
+};
+
+// The stored binding for this pad model. A new one is seeded from what the pad
+// currently uses, so every entry written out is complete.
+static pad_binding_t *binding_for_pad(uint16_t vid, uint16_t pid) {
+  for (int i = 0; i < s_cfg.padmap_count; i++) {
+    if (s_cfg.padmap[i].vid == vid && s_cfg.padmap[i].pid == pid) {
+      return &s_cfg.padmap[i];
+    }
+  }
+  if (s_cfg.padmap_count >= PAD_BINDING_MAX) {
+    return NULL;
+  }
+
+  pad_binding_t *binding = &s_cfg.padmap[s_cfg.padmap_count++];
+  binding->vid = vid;
+  binding->pid = pid;
+  for (int field = 0; field < PAD_FIELD_COUNT; field++) {
+    binding->field[field] = input_bt_profile_get(field);
+  }
+  return binding;
+}
+
+static void forget_binding(uint16_t vid, uint16_t pid) {
+  for (int i = 0; i < s_cfg.padmap_count; i++) {
+    if (s_cfg.padmap[i].vid != vid || s_cfg.padmap[i].pid != pid) {
+      continue;
+    }
+    for (int j = i + 1; j < s_cfg.padmap_count; j++) {
+      s_cfg.padmap[j - 1] = s_cfg.padmap[j];
+    }
+    s_cfg.padmap_count--;
+    return;
+  }
+}
+
+// Another control already sitting on this button, for the confirmation notice.
+static const char *field_using(const pad_binding_t *binding, int field, int index) {
+  for (int i = 0; i < PAD_FIELD_COUNT; i++) {
+    if (i != field && binding->field[i] == index) {
+      return kMappingItems[i];
+    }
+  }
+  return NULL;
+}
+
+static void mapping_badge(int index, char *out, size_t out_size) {
+  if (index >= PAD_FIELD_COUNT) {
+    return;
+  }
+
+  const int8_t bound = input_bt_profile_get(index);
+  if (bound < 0) {
+    snprintf(out, out_size, "unmapped");
+    return;
+  }
+
+  const char *effect = input_gb_mask_name(input_bt_map_probe(index));
+  if (effect[0] != '\0') {
+    snprintf(out, out_size, "btn %d > %s", bound, effect);
+  } else {
+    snprintf(out, out_size, "btn %d", bound);
+  }
+}
+
+#define CAPTURE_CANCELLED (-1)
+#define CAPTURE_CLEARED (-2)
+
+// Waits for a pad button to be pressed, and answers with its index - or one of
+// the two codes above if the player clears the binding or gives up.
+static int capture_pad_button(const char *label) {
+  const int64_t deadline = esp_timer_get_time() + 15 * 1000000;
+
+  input_bt_capture_begin();
+
+  while (true) {
+    ui_clear();
+    ui_row(UI_TITLE_ROW, "KEY MAPPING", false, true);
+    ui_row(3, label, false, true);
+    ui_row(6, "Press the pad button to use", true, false);
+    ui_row(UI_HINT_ROW, "KEY:clear hold both:cancel", true, false);
+    ui_status_bar();
+    ui_flush();
+    console_poll();
+
+    const int captured = input_bt_capture_take();
+    if (captured >= 0) {
+      input_bt_capture_end();
+      return captured;
+    }
+
+    const uint8_t raw = buttons_poll();
+    if (raw == (BTN_KEY | BTN_BOOT)) {
+      if (buttons_hold_ms() >= BTN_CHORD_MS) {
+        input_bt_capture_end();
+        return CAPTURE_CANCELLED;
+      }
+    } else if (raw & BTN_KEY) {
+      input_bt_capture_end();
+      return CAPTURE_CLEARED;
+    }
+
+    // Never leave the device on a screen with no way out.
+    if (esp_timer_get_time() > deadline) {
+      input_bt_capture_end();
+      return CAPTURE_CANCELLED;
+    }
+    vTaskDelay(pdMS_TO_TICKS(20));
+  }
+}
+
+static void menu_key_mapping(void) {
+  uint16_t vid;
+  uint16_t pid;
+
+  if (!input_bt_connected()) {
+    ui_notice("KEY MAPPING", "Connect a gamepad first", 1500);
+    return;
+  }
+  if (!input_bt_identity(&vid, &pid)) {
+    ui_notice("KEY MAPPING", "Gamepad not ready", 1500);
+    return;
+  }
+
+  int selection = 0;
+  while (true) {
+    const int chosen = ui_menu("KEY MAPPING", kMappingItems, PAD_FIELD_COUNT + 1, selection,
+                               mapping_badge);
+    if (chosen < 0) {
+      return;
+    }
+    selection = chosen;
+
+    if (chosen == MAPPING_RESET_ROW) {
+      forget_binding(vid, pid);
+      input_bt_binding_reset(vid, pid);
+      cfg_save();
+      ui_notice("KEY MAPPING", "Back to defaults", 900);
+      continue;
+    }
+
+    pad_binding_t *binding = binding_for_pad(vid, pid);
+    if (binding == NULL) {
+      ui_notice("KEY MAPPING", "No room for another pad", 1500);
+      continue;
+    }
+
+    const int captured = capture_pad_button(kMappingItems[chosen]);
+    if (captured == CAPTURE_CANCELLED) {
+      continue;
+    }
+
+    char message[48];
+    if (captured == CAPTURE_CLEARED) {
+      binding->field[chosen] = -1;
+      snprintf(message, sizeof(message), "%.24s cleared", kMappingItems[chosen]);
+    } else {
+      binding->field[chosen] = (int8_t)captured;
+      const char *clash = field_using(binding, chosen, captured);
+      if (clash != NULL) {
+        snprintf(message, sizeof(message), "btn %d, also %.16s", captured, clash);
+      } else {
+        snprintf(message, sizeof(message), "Bound to button %d", captured);
+      }
+    }
+
+    input_bt_binding_set(binding);
+    cfg_save();
+    ui_notice("KEY MAPPING", message, 900);
+  }
+}
+
 static void menu_bluetooth(void) {
   static const char *const items[] = {
       "Scan for gamepads",
       "Forget gamepad",
+      "Button mapping",
   };
   int selection = 0;
 
@@ -332,6 +564,11 @@ static void menu_bluetooth(void) {
     if (chosen == 1) {
       input_bt_forget();
       ui_notice("BLUETOOTH", "Forgotten", 900);
+      continue;
+    }
+
+    if (chosen == 2) {
+      menu_key_mapping();
       continue;
     }
 
@@ -693,6 +930,12 @@ void app_main(void) {
   }
 
   cfg_load();
+
+  // Hand the saved button mappings over before any pad can connect, so a pad
+  // that is already bonded comes up with the mapping its owner set.
+  for (int i = 0; i < s_cfg.padmap_count; i++) {
+    input_bt_binding_set(&s_cfg.padmap[i]);
+  }
 
   while (true) {
     char rom_path[256] = {0};
