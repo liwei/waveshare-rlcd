@@ -100,3 +100,7 @@ void input_bt_test_press(int index);
 // button. "Connected but no report ever carries a button" means the pad is
 // sending something other than gamepad input.
 void input_bt_rx_stats(uint32_t *total, uint32_t *with_buttons);
+
+// The connected pad's HID report descriptor as seen at connect, for consoles and
+// argument settling. Length 0 when no pad has connected.
+const uint8_t *input_bt_descriptor(size_t *len);

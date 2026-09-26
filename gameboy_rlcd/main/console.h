@@ -9,6 +9,7 @@
 //   x  frame-skip policy: auto, never, or every other frame
 //   i  the pad's button mapping: each control, the index it uses, and the Game Boy button that comes out
 //   j  inject a pad button press (cycles through the indices)
+//   v  dump the connected pad's HID report descriptor
 //   g  core registers
 //   p  toggle logging of every BLE input report (for unknown pads)
 //   B  start a BLE scan        l  list scan results     c  forget the bond

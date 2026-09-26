@@ -50,6 +50,11 @@ static uint32_t s_reports_seen; /* report IDs seen since this pad connected */
 // latter, which from the outside looks exactly like a dead pad.
 static volatile uint32_t s_rx_total;
 static volatile uint32_t s_rx_with_buttons;
+static bool s_media_only_warned;
+
+// The pad's HID report descriptor as it was at connect, for the console to dump.
+static uint8_t s_desc[512];
+static size_t s_desc_len;
 static volatile bool s_connected;
 static char s_name[48] = "";
 
@@ -363,6 +368,16 @@ static void handle_pad_state(const hid_gamepad_map_t *map, const hid_gamepad_sta
     s_rx_with_buttons++;
   }
 
+  // A pad that only ever sends consumer/media reports is not in gamepad mode. It
+  // looks exactly like a pad with dead buttons, and nothing else on the device
+  // can tell the two apart, so say it once it is beyond doubt.
+  if (!s_media_only_warned && s_rx_total >= 8 && s_rx_with_buttons == 0) {
+    s_media_only_warned = true;
+    ESP_LOGW(TAG,
+             "pad has sent %u reports and no buttons: it may be in a media or keyboard mode",
+             (unsigned)s_rx_total);
+  }
+
   if (s_capture) {
     // Compare against the previous state, and against the last one the pad
     // reported rather than the first to arrive after the screen opened: a BLE
@@ -459,19 +474,19 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
       }
 
       s_map_count = 0;
+      s_desc_len = 0;
       size_t num_maps = 0;
       esp_hid_raw_report_map_t *report_maps = NULL;
       if (esp_hidh_dev_report_maps_get(s_dev, &num_maps, &report_maps) == ESP_OK) {
         for (size_t i = 0; i < num_maps && s_map_count < HID_GP_MAX_REPORTS; i++) {
-          if (s_verbose) {
-            char hex[3 * 128 + 1];
-            size_t n = 0;
-            for (size_t b = 0; b < report_maps[i].len && b < 128; b++) {
-              n += (size_t)snprintf(hex + n, sizeof(hex) - n, "%02x", report_maps[i].data[b]);
-            }
-            ESP_LOGI(TAG, "descriptor %u (%u bytes): %s", (unsigned)i,
-                     (unsigned)report_maps[i].len, hex);
+          // Keep a copy of the descriptor. It is the ground truth for what the
+          // pad is presenting, and the only way to tell a parser that
+          // misunderstands a pad from a pad that is not sending gamepad input.
+          if (s_desc_len + report_maps[i].len <= sizeof(s_desc)) {
+            memcpy(&s_desc[s_desc_len], report_maps[i].data, report_maps[i].len);
+            s_desc_len += report_maps[i].len;
           }
+
           s_map_count += hid_gamepad_parse(report_maps[i].data, report_maps[i].len,
                                            &s_maps[s_map_count], HID_GP_MAX_REPORTS - s_map_count);
         }
@@ -495,6 +510,7 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
       s_reports_seen = 0;
       s_rx_total = 0;
       s_rx_with_buttons = 0;
+      s_media_only_warned = false;
       ESP_LOGI(TAG, "connected to %s (%d report map(s))", s_name, s_map_count);
       break;
     }
@@ -837,6 +853,15 @@ void input_bt_rx_stats(uint32_t *total, uint32_t *with_buttons) {
   if (with_buttons != NULL) {
     *with_buttons = s_rx_with_buttons;
   }
+}
+
+// The report descriptor the connected pad presented, and how long it was. This
+// is what the pad says it is, as opposed to what it actually sends.
+const uint8_t *input_bt_descriptor(size_t *len) {
+  if (len != NULL) {
+    *len = s_desc_len;
+  }
+  return s_desc;
 }
 
 bool input_bt_take_menu(void) {

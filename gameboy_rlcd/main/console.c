@@ -219,6 +219,20 @@ void console_poll(void) {
         next_index = (next_index + 1) % 16;
         break;
       }
+      case 'v': {
+        size_t len = 0;
+        const uint8_t *desc = input_bt_descriptor(&len);
+        write_fmt("descriptor: %u bytes\n", (unsigned)len);
+        for (size_t i = 0; i < len; i += 16) {
+          char line[3 * 16 + 1];
+          size_t n = 0;
+          for (size_t b = i; b < len && b < i + 16; b++) {
+            n += (size_t)snprintf(line + n, sizeof(line) - n, "%02x", desc[b]);
+          }
+          write_fmt("  %s\n", line);
+        }
+        break;
+      }
       case 'i': {
         static const char *const names[PAD_ACTION_COUNT] = {
             "A", "B", "Start", "Select", "Up", "Down", "Left", "Right", "Menu"};
