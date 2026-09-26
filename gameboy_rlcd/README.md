@@ -285,8 +285,9 @@ it if the mode is stored.
 
 ## ROM manager (WiFi)
 
-The ROM picker's **WiFi ROM manager** entry turns the device into its own WiFi
-access point and serves a page for managing the SD card:
+The ROM picker's **WiFi ROM manager** entry restarts the device into a second
+application, which becomes its own WiFi access point and serves a page for
+managing the SD card:
 
 | | |
 | --- | --- |
@@ -294,34 +295,43 @@ access point and serves a page for managing the SD card:
 | Address | <http://192.168.4.1> |
 
 Join that network from a phone or laptop and open the address. The page lists the
-ROMs on the card with their sizes and whether each has a save, takes uploads by
-drag-and-drop or file picker with a progress bar, and deletes a ROM together with
-its `.sav` and `.state` so nothing is orphaned. An upload appears in the picker
-straight away, because the picker rescans every time it opens. Holding both
-buttons leaves the screen.
+ROMs with their sizes and whether each has a save, takes uploads by drag-and-drop
+or file picker with a progress bar, and deletes a ROM together with its `.sav` and
+`.state` so nothing is orphaned. An upload appears in the picker straight away,
+because the picker rescans every time it opens. Holding both buttons leaves the
+manager and restarts back into the emulator; entering and leaving are both
+`esp_ota_set_boot_partition` followed by a restart.
 
-Worth knowing:
+### Why it is a separate application
 
-* The device makes its own network rather than joining yours: nothing to store,
-  nothing to configure, and it works with the card out of the device — the
-  situation this exists for. The cost is that you step off your own network while
-  you use it.
-* Nothing is served while a game is running. The access point is started when the
-  screen opens and stopped when it closes, because WiFi and Bluetooth share the
-  radio and the emulator has a frame budget to keep.
-* The WPA2 passphrase is the only gate. The page itself asks for nothing, and it
-  can delete files.
-* Getting WiFi in at all is a RAM problem, not a flash one. `esp_wifi_init` plus
-  the HTTP server want about 73 KB of *internal* RAM, and this build has roughly
-  80 KB spare once Bluetooth and the emulator's buffers are up. Two things made
-  room: the framebuffer moved to PSRAM (only the CPU ever touches it — the panel's
-  DMA reads the stage buffer it is repacked into), and the WiFi buffer pools are
-  trimmed. Note that `CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP`, the obvious way to
-  save internal RAM, actually made this worse: it raises the static RX buffer
-  default from 10 to 16, and those buffers are DMA-capable, so they must be
-  internal. `CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6` sets that back.
-* Leaving the screen calls `esp_wifi_deinit`, so the mode costs nothing for the
-  rest of the session rather than leaving 60 KB of driver resident.
+WiFi wants about 73 KB of internal RAM, and the emulator's buffers want the same
+memory. Everything tried within a single image either failed to start the radio
+(`esp_wifi_init: ESP_ERR_NO_MEM`, which is what "Could not start WiFi" on screen
+meant) or moved the emulator's buffers somewhere slower to make room — and a
+stored cartridge save is 32 KB of it, so whether it fitted depended on whether a
+game had been played.
+
+Two images have no such conflict. The emulator's partition carries no WiFi at all,
+and the manager's carries no emulator:
+
+| Slot | Contents |
+| --- | --- |
+| `ota_0` | the emulator |
+| `ota_1` | the ROM manager |
+| `otadata` | which of them the bootloader starts |
+
+The difference is stark. In the combined build, WiFi came up with **7 KB** of
+internal RAM left; in the manager, with the same checks and buffers, **195 KB**.
+
+Both are built and flashed by `tools/flash_all.sh`. It exists because the
+manager's binary has to be written into `ota_1` by hand — the manager's own
+`idf.py flash` would put it in `ota_0` and overwrite the emulator. Changing the
+partition table needs `tools/flash_all.sh <port> --erase` once, which also clears
+the saved gamepad and means re-pairing it.
+
+The device makes its own network rather than joining yours: nothing to configure,
+and it works with the card out of the device — the situation this exists for. The
+WPA2 passphrase is the only gate on a page that can delete files.
 
 ## Storage, saves and audio
 

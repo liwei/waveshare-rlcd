@@ -365,6 +365,7 @@ bool web_start(void) {
 
   if (!start_ap()) {
     stop_ap();
+    ESP_LOGE(TAG, "ap failed with %u bytes of internal heap free", (unsigned)before);
     return false;
   }
 

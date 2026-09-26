@@ -28,6 +28,9 @@ typedef struct {
 // not mounted.
 int rom_files_list(rom_entry_t *out, int max);
 
+// How many ROMs the card holds, for a status line.
+int rom_files_count(void);
+
 // Card capacity in bytes. Zeros when the card is not mounted.
 void rom_files_space(uint64_t *total, uint64_t *free_bytes);
 

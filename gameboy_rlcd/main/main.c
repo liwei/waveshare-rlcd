@@ -8,6 +8,8 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_ota_ops.h"
+#include "esp_partition.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -24,12 +26,10 @@
 #include "input.h"
 #include "input_bt.h"
 #include "profiler.h"
-#include "rom_files.h"
 #include "st7305.h"
 #include "storage_sd.h"
 #include "testrom.h"
 #include "ui.h"
-#include "web.h"
 
 static const char *TAG = "gameboy_rlcd";
 
@@ -573,85 +573,25 @@ static void menu_key_mapping(void) {
   }
 }
 
-// The management screen: the access point's details, what is on the card, and
-// how many devices have joined. Nothing here is a game, so it only has to be
-// readable and to get out of the way.
-static void bytes_text(uint64_t bytes, char *out, size_t out_size) {
-  static const char *const kUnits[] = {"B", "KB", "MB", "GB"};
-  double value = (double)bytes;
-  int unit = 0;
-
-  while (value >= 1024.0 && unit < 3) {
-    value /= 1024.0;
-    unit++;
-  }
-  snprintf(out, out_size, (unit == 0) ? "%.0f %s" : "%.1f %s", value, kUnits[unit]);
-}
-
-void menu_rom_manager(void) {
-  if (!storage_sd_ready()) {
-    ui_notice("ROM MANAGER", "No SD card", 1500);
+// Hand over to the ROM manager. It is a separate application in a separate
+// partition - one image cannot have both the emulator's buffers and WiFi's - so
+// switching is the bootloader's job: point it at the other slot and restart.
+static void switch_to_rom_manager(void) {
+  const esp_partition_t *manager =
+      esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_1, NULL);
+  if (manager == NULL) {
+    ui_notice("ROM MANAGER", "Not installed", 2000);
     return;
   }
 
-  if (!web_start()) {
-    ui_notice("ROM MANAGER", "Could not start WiFi", 2000);
+  ui_notice("ROM MANAGER", "Switching over...", 1200);
+  if (esp_ota_set_boot_partition(manager) != ESP_OK) {
+    ui_notice("ROM MANAGER", "Could not switch", 2000);
     return;
   }
 
-  int rom_count = ui_rom_count();
-  int tick = 0;
-
-  while (true) {
-    uint64_t total = 0;
-    uint64_t free_bytes = 0;
-    rom_files_space(&total, &free_bytes);
-
-    char summary[48];
-    char free_text[24];
-    bytes_text(free_bytes, free_text, sizeof(free_text));
-    snprintf(summary, sizeof(summary), "%d ROMs, %s free", rom_count, free_text);
-
-    char clients[48];
-    const int joined = web_client_count();
-    if (joined == 0) {
-      snprintf(clients, sizeof(clients), "Waiting for a device");
-    } else {
-      snprintf(clients, sizeof(clients), "%d device%s connected", joined,
-               (joined == 1) ? "" : "s");
-    }
-
-    ui_clear();
-    ui_row(UI_TITLE_ROW, "ROM MANAGER", false, true);
-    ui_row(3, "Join WiFi", true, false);
-    ui_row(4, web_ssid(), false, true);
-    ui_row(6, "Password", true, false);
-    ui_row(7, web_password(), false, true);
-    ui_row(9, "Then open", true, false);
-    ui_row(10, web_ip(), false, true);
-    ui_row(13, summary, true, false);
-    ui_row(14, clients, true, false);
-    ui_row(UI_HINT_ROW, "hold BOTH:back", true, false);
-    ui_status_bar();
-    ui_flush();
-    console_poll();
-
-    // The count and the file list only change when someone uses the page, so
-    // walking the card every tick would be wasted work.
-    if (++tick >= 8) {
-      tick = 0;
-      rom_count = ui_rom_count();
-    }
-
-    const uint8_t raw = buttons_poll();
-    if (raw == (BTN_KEY | BTN_BOOT) && buttons_hold_ms() >= BTN_CHORD_MS) {
-      break;
-    }
-
-    vTaskDelay(pdMS_TO_TICKS(250));
-  }
-
-  web_stop();
+  ESP_LOGI(TAG, "switching to %s", manager->label);
+  esp_restart();
 }
 
 static void menu_bluetooth(void) {
@@ -1066,7 +1006,7 @@ void app_main(void) {
     }
 
     if (pick == UI_ROM_PICK_MANAGER) {
-      menu_rom_manager();
+      switch_to_rom_manager();
       continue;
     }
 

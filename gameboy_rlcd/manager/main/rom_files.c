@@ -6,6 +6,7 @@
 #include <sys/unistd.h>
 
 #include "dirent.h"
+#include "esp_heap_caps.h"
 #include "esp_vfs_fat.h"
 
 #include "config.h"
@@ -142,6 +143,18 @@ int rom_files_list(rom_entry_t *out, int max) {
   }
   closedir(dir);
 
+  return count;
+}
+
+int rom_files_count(void) {
+  rom_entry_t *entries =
+      heap_caps_calloc(ROM_FILES_MAX, sizeof(rom_entry_t), MALLOC_CAP_SPIRAM);
+  if (entries == NULL) {
+    return 0;
+  }
+
+  const int count = rom_files_list(entries, ROM_FILES_MAX);
+  heap_caps_free(entries);
   return count;
 }
 

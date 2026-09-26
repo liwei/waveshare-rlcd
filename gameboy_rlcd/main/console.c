@@ -21,7 +21,6 @@
 #include "minigb_apu/minigb_apu.h"
 #include "st7305.h"
 #include "ui.h"
-#include "web.h"
 
 static const char *TAG = "console";
 
@@ -83,11 +82,11 @@ static void status_line(void) {
   input_bt_rx_stats(&rx_total, &rx_buttons);
 
   write_fmt(
-      "state=%s mode=%s menu=%d bt=%s pad=0x%02x buttons=0x%02x rx=%u/%u engine=%s rate=%d vol=%d "
-      "ring=%d underruns=%u heap=%uKB\n",
+      "state=%s mode=%s menu=%d bt=%s pad=0x%02x buttons=0x%02x rx=%u/%u engine=%s rate=%d "
+      "vol=%d ring=%d underruns=%u heap=%uKB\n",
       paperboy_gb_is_ready() ? "ready" : "idle", paperboy_gb_is_cgb() ? "CGB" : "DMG",
-      ui_menu_active() ? 1 : 0, input_bt_connected() ? input_bt_name() : "-", input_bt_buttons(),
-      paperboy_gb_buttons(), (unsigned)rx_total, (unsigned)rx_buttons,
+      ui_menu_active() ? 1 : 0, input_bt_connected() ? input_bt_name() : "-",
+      input_bt_buttons(), paperboy_gb_buttons(), (unsigned)rx_total, (unsigned)rx_buttons,
       audio_engine_name(audio_get_engine()), AUDIO_SAMPLE_RATE, audio_get_volume(),
       audio_ring_used(), (unsigned)audio_underrun_count(),
       (unsigned)(esp_get_free_heap_size() / 1024));
@@ -220,14 +219,6 @@ void console_poll(void) {
         next_index = (next_index + 1) % 16;
         break;
       }
-      case 'w':
-        if (web_running()) {
-          web_stop();
-          write_str("rom manager stopped\n");
-        } else {
-          write_fmt("rom manager: %s\n", web_start() ? "started, 192.168.4.1" : "failed");
-        }
-        break;
       case 'v': {
         size_t len = 0;
         const uint8_t *desc = input_bt_descriptor(&len);
