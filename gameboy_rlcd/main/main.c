@@ -514,6 +514,10 @@ static void menu_key_mapping(void) {
     return;
   }
 
+  // The flow is two steps and neither the list nor its hint row says so: a row
+  // has to be opened before a pad button means anything.
+  ui_notice("KEY MAPPING", "Pick a button, then press the pad", 1800);
+
   int selection = 0;
   while (true) {
     const int chosen = ui_menu("KEY MAPPING", kMappingItems, PAD_ACTION_COUNT + 1, selection,

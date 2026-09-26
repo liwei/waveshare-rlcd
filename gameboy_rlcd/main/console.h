@@ -7,7 +7,8 @@
 //   f  frame timing summary
 //   F  time one full-screen repaint, split into repacking and SPI
 //   x  frame-skip policy: auto, never, or every other frame
-//   i  the pad's button-to-Game-Boy mapping under the profile in force
+//   i  the pad's button mapping: each control, the index it uses, and the Game Boy button that comes out
+//   j  inject a pad button press (cycles through the indices)
 //   g  core registers
 //   p  toggle logging of every BLE input report (for unknown pads)
 //   B  start a BLE scan        l  list scan results     c  forget the bond

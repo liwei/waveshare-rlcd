@@ -205,6 +205,15 @@ void console_poll(void) {
         input_bt_forget();
         write_str("bond forgotten\n");
         break;
+      case 'j': {
+        // Step through the pad's button indices, one per press of this key, so
+        // the mapping page can be exercised with no pad in hand.
+        static int next_index;
+        input_bt_test_press(next_index);
+        write_fmt("injected pad button %d\n", next_index);
+        next_index = (next_index + 1) % 16;
+        break;
+      }
       case 'i': {
         static const char *const names[PAD_ACTION_COUNT] = {
             "A", "B", "Start", "Select", "Up", "Down", "Left", "Right", "Menu"};

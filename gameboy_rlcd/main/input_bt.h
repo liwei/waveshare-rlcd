@@ -91,3 +91,7 @@ void input_bt_capture_end(void);
 // The pad's buttons as of its last report. While the capture screen is up this
 // is what makes it visible whether the pad is saying anything at all.
 uint32_t input_bt_live_buttons(void);
+
+// Console test hook: feed in one button press through the same path a real
+// report takes, so the capture can be checked without a pad.
+void input_bt_test_press(int index);

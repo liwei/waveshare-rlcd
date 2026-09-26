@@ -37,6 +37,7 @@ static bool s_spend_chord;
 // Learning a button: the next one pressed becomes the answer, and until that
 // happens the pad drives nothing at all.
 static volatile bool s_capture;
+static volatile bool s_capture_saw; /* logged the first report of this capture */
 static volatile int s_capture_result;
 static uint32_t s_capture_prev;   /* last button word, the baseline for "new" */
 static volatile uint32_t s_live_buttons; /* what the pad last reported */
@@ -347,6 +348,77 @@ static uint8_t map_state_to_gb(const hid_gamepad_map_t *map, const hid_gamepad_s
 
 /* --------------------------------------------------------------- esp_hidh */
 
+// Everything that happens for one pad state, whether it arrived over the air or
+// was handed in by the console test hook below.
+static void handle_pad_state(const hid_gamepad_map_t *map, const hid_gamepad_state_t *state) {
+  if (s_capture) {
+    // Compare against the previous state, and against the last one the pad
+    // reported rather than the first to arrive after the screen opened: a BLE
+    // pad says nothing until something changes, so that first report is the
+    // press itself.
+    if (!s_capture_saw) {
+      s_capture_saw = true;
+      ESP_LOGI(TAG, "capture: first report 0x%08lx", (unsigned long)state->buttons);
+    }
+
+    const uint32_t fresh = state->buttons & ~s_capture_prev;
+    s_capture_prev = state->buttons;
+    s_live_buttons = state->buttons;
+    if (fresh != 0 && s_capture_result < 0) {
+      s_capture_result = __builtin_ctz(fresh);
+      ESP_LOGI(TAG, "capture: button %d", s_capture_result);
+    }
+    s_gb_mask = 0;
+    return;
+  }
+
+  s_live_buttons = state->buttons;
+  s_capture_prev = state->buttons;
+
+  s_gb_mask = map_state_to_gb(map, state);
+
+  // After a binding, the player is still holding the button they just used.
+  // Nothing reaches the menu until they let go: a held d-pad would otherwise
+  // scroll the page out from under them.
+  if (s_swallow_buttons) {
+    s_gb_mask = 0;
+    if (state->buttons == 0) {
+      s_swallow_buttons = false;
+    }
+    return;
+  }
+
+  // Start+Select opened the pause menu, so that press belongs to the menu and
+  // not to the game: without this the buttons reach the game again as soon as
+  // play resumes - and most titles read a held Start as "open the map". Both are
+  // swallowed until they are released, after which the pad behaves normally
+  // again (Start and Select are ordinary menu buttons).
+  if (s_spend_chord) {
+    s_gb_mask &= (uint8_t)~(GB_BTN_START | GB_BTN_SELECT);
+    if (!pad_chord_buttons_down(state)) {
+      s_spend_chord = false;
+    }
+  }
+}
+
+// Console test hook: press one button index, having released everything first so
+// it reads as a fresh press. Exercises the same path a real report takes, which
+// is the only way to check the capture without a pad in hand.
+void input_bt_test_press(int index) {
+  hid_gamepad_map_t map;
+  hid_gamepad_state_t state;
+
+  memset(&map, 0, sizeof(map));
+  memset(&state, 0, sizeof(state));
+  state.hat = -1;
+
+  handle_pad_state(&map, &state);
+  if (index >= 0 && index < 32) {
+    state.buttons = 1u << index;
+    handle_pad_state(&map, &state);
+  }
+}
+
 static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id, void *event_data) {
   esp_hidh_event_data_t *param = (esp_hidh_event_data_t *)event_data;
   (void)handler_args;
@@ -441,49 +513,7 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
           hid_gamepad_find(s_maps, s_map_count, (uint16_t)param->input.report_id);
       hid_gamepad_state_t state;
       hid_gamepad_decode(map, param->input.data, param->input.length, &state);
-
-      if (s_capture) {
-        // Compare against the last report seen, not against the first one to
-        // arrive after the screen opened: a BLE pad says nothing until something
-        // changes, so that first report is the press itself and using it as the
-        // baseline ate it.
-        const uint32_t fresh = state.buttons & ~s_capture_prev;
-        s_capture_prev = state.buttons;
-        s_live_buttons = state.buttons;
-        if (fresh != 0 && s_capture_result < 0) {
-          s_capture_result = __builtin_ctz(fresh);
-        }
-        s_gb_mask = 0;
-        break;
-      }
-
-      s_live_buttons = state.buttons;
-      s_capture_prev = state.buttons;
-
-      s_gb_mask = map_state_to_gb(map, &state);
-
-      // After a binding, the player is still holding the button they just used.
-      // Nothing reaches the menu until they let go: a held d-pad would otherwise
-      // scroll the page out from under them.
-      if (s_swallow_buttons) {
-        s_gb_mask = 0;
-        if (state.buttons == 0) {
-          s_swallow_buttons = false;
-        }
-        break;
-      }
-
-      // Start+Select opened the pause menu, so that press belongs to the menu
-      // and not to the game: without this the buttons reach the game again as
-      // soon as play resumes - and most titles read a held Start as "open the
-      // map". Both are swallowed until they are released, after which the pad
-      // behaves normally again (Start and Select are ordinary menu buttons).
-      if (s_spend_chord) {
-        s_gb_mask &= (uint8_t)~(GB_BTN_START | GB_BTN_SELECT);
-        if (!pad_chord_buttons_down(&state)) {
-          s_spend_chord = false;
-        }
-      }
+      handle_pad_state(map, &state);
       break;
     }
 
@@ -750,6 +780,8 @@ bool input_bt_identity(uint16_t *vid, uint16_t *pid) {
 }
 
 void input_bt_capture_begin(void) {
+  ESP_LOGI(TAG, "capture: waiting for a button");
+  s_capture_saw = false;
   s_capture_result = -1;
   s_capture = true;
 }
@@ -763,6 +795,7 @@ int input_bt_capture_take(void) {
 }
 
 void input_bt_capture_end(void) {
+  ESP_LOGI(TAG, "capture: stopped");
   s_capture = false;
   s_gb_mask = 0;
   s_swallow_buttons = true;
