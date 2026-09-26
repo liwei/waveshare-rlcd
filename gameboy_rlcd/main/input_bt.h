@@ -95,3 +95,8 @@ uint32_t input_bt_live_buttons(void);
 // Console test hook: feed in one button press through the same path a real
 // report takes, so the capture can be checked without a pad.
 void input_bt_test_press(int index);
+
+// Reports received since this pad connected, and how many of them carried a
+// button. "Connected but no report ever carries a button" means the pad is
+// sending something other than gamepad input.
+void input_bt_rx_stats(uint32_t *total, uint32_t *with_buttons);

@@ -43,6 +43,13 @@ static uint32_t s_capture_prev;   /* last button word, the baseline for "new" */
 static volatile uint32_t s_live_buttons; /* what the pad last reported */
 static volatile bool s_swallow_buttons;
 static volatile bool s_has_hat; /* the pad reports its D-pad as a hat switch */
+static uint32_t s_reports_seen; /* report IDs seen since this pad connected */
+
+// Reports received, and how many of them carried a button. A pad that is
+// connected but stuck in a keyboard or media mode sends the former and never the
+// latter, which from the outside looks exactly like a dead pad.
+static volatile uint32_t s_rx_total;
+static volatile uint32_t s_rx_with_buttons;
 static volatile bool s_connected;
 static char s_name[48] = "";
 
@@ -351,6 +358,11 @@ static uint8_t map_state_to_gb(const hid_gamepad_map_t *map, const hid_gamepad_s
 // Everything that happens for one pad state, whether it arrived over the air or
 // was handed in by the console test hook below.
 static void handle_pad_state(const hid_gamepad_map_t *map, const hid_gamepad_state_t *state) {
+  s_rx_total++;
+  if (state->buttons != 0) {
+    s_rx_with_buttons++;
+  }
+
   if (s_capture) {
     // Compare against the previous state, and against the last one the pad
     // reported rather than the first to arrive after the screen opened: a BLE
@@ -480,6 +492,9 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
       }
 
       s_connected = true;
+      s_reports_seen = 0;
+      s_rx_total = 0;
+      s_rx_with_buttons = 0;
       ESP_LOGI(TAG, "connected to %s (%d report map(s))", s_name, s_map_count);
       break;
     }
@@ -507,6 +522,18 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
           ESP_LOGI(TAG, "report id=%u len=%u %s", (unsigned)param->input.report_id,
                    (unsigned)param->input.length, hex);
         }
+      }
+
+      // A pad that never sends its button report looks exactly like one whose
+      // buttons are broken. Say once per connection which report IDs it actually
+      // uses and whether any of them carries buttons, so the difference shows.
+      const uint16_t report_id = (uint16_t)param->input.report_id;
+      if ((s_reports_seen & (1u << (report_id & 31u))) == 0) {
+        s_reports_seen |= 1u << (report_id & 31u);
+        const hid_gamepad_map_t *seen = hid_gamepad_find(s_maps, s_map_count, report_id);
+        ESP_LOGI(TAG, "first report with id=%u: %s", (unsigned)report_id,
+                 (seen != NULL && seen->button_count > 0) ? "carries buttons"
+                                                          : "no buttons in this report");
       }
 
       const hid_gamepad_map_t *map =
@@ -802,6 +829,15 @@ void input_bt_capture_end(void) {
 }
 
 uint32_t input_bt_live_buttons(void) { return s_live_buttons; }
+
+void input_bt_rx_stats(uint32_t *total, uint32_t *with_buttons) {
+  if (total != NULL) {
+    *total = s_rx_total;
+  }
+  if (with_buttons != NULL) {
+    *with_buttons = s_rx_with_buttons;
+  }
+}
 
 bool input_bt_take_menu(void) {
   const bool edge = s_menu_edge;

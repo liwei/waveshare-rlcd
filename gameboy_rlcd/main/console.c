@@ -77,13 +77,18 @@ static void dump_framebuffer(void) {
 }
 
 static void status_line(void) {
+  uint32_t rx_total;
+  uint32_t rx_buttons;
+  input_bt_rx_stats(&rx_total, &rx_buttons);
+
   write_fmt(
-      "state=%s mode=%s menu=%d bt=%s pad=0x%02x buttons=0x%02x engine=%s rate=%d vol=%d ring=%d "
-      "underruns=%u heap=%uKB\n",
+      "state=%s mode=%s menu=%d bt=%s pad=0x%02x buttons=0x%02x rx=%u/%u engine=%s rate=%d vol=%d "
+      "ring=%d underruns=%u heap=%uKB\n",
       paperboy_gb_is_ready() ? "ready" : "idle", paperboy_gb_is_cgb() ? "CGB" : "DMG",
       ui_menu_active() ? 1 : 0, input_bt_connected() ? input_bt_name() : "-", input_bt_buttons(),
-      paperboy_gb_buttons(), audio_engine_name(audio_get_engine()), AUDIO_SAMPLE_RATE,
-      audio_get_volume(), audio_ring_used(), (unsigned)audio_underrun_count(),
+      paperboy_gb_buttons(), (unsigned)rx_total, (unsigned)rx_buttons,
+      audio_engine_name(audio_get_engine()), AUDIO_SAMPLE_RATE, audio_get_volume(),
+      audio_ring_used(), (unsigned)audio_underrun_count(),
       (unsigned)(esp_get_free_heap_size() / 1024));
 }
 
