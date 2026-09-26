@@ -264,6 +264,25 @@ Pads that report only *changed* bytes rather than the whole button field will no
 capture cleanly, since the page compares each decoded report against the last.
 The Q36 sends full reports.
 
+### When the pad connects but nothing responds
+
+Check the pad before the firmware. A dual-mode pad that has slipped into its
+keyboard or media mode still connects, still lights up and still sends reports —
+but they are consumer-control reports, which carry no buttons by definition, so
+nothing on this side can tell that apart from a pad with dead buttons.
+
+The device now says so rather than leaving it to guesswork. In the status line,
+`rx=<reports>/<with-buttons>`: if the first number climbs while you press and the
+second stays at 0, the pad is not being a gamepad, and the log warns once eight
+reports have arrived with no button in any of them. `console` command `v` dumps
+the pad's report descriptor, which is what settled it here: the Q36 presents a
+Game Pad collection with four axes, a hat switch and sixteen buttons, all unused,
+while every report it actually sent went to a Consumer Control report instead.
+
+The remedy is on the pad — its mode switch, or whichever button combination
+toggles gamepad mode — followed by re-pairing. A power cycle alone does not clear
+it if the mode is stored.
+
 ## Storage, saves and audio
 
 * ROMs come from a FAT32 microSD card, scanned one directory deep from
@@ -350,11 +369,13 @@ stops reading cannot stall the emulator.
 | Key | Action |
 | --- | --- |
 | `d` | dump the framebuffer (`FBUF <len>` then hex rows) |
-| `s` | status: state, video mode, Bluetooth, audio engine/volume/ring, heap; `pad` is the gamepad's mask and `buttons` what the emulator core is being fed |
+| `s` | status: state, video mode, Bluetooth, audio, heap; `pad` is the gamepad's mask, `buttons` what the emulator core is being fed, `rx=<reports>/<with-buttons>` what the pad has sent |
 | `f` | frame timing summary |
 | `F` | time one full-screen repaint, split into repacking and SPI |
 | `x` | frame-skip policy: auto, never, or every other frame |
 | `i` | the button map: each Game Boy button and the pad button that plays it |
+| `j` | inject a pad button press, cycling through the indices (no pad needed) |
+| `v` | dump the connected pad's HID report descriptor |
 | `g` | core registers (PC, LCDC, LY, interrupt state, tile-map base) |
 | `k` / `u` | press / release KEY (`b` for BOOT, `n` for both, `N` to hand control back to the pins) |
 | `B` / `l` / `c` | start a BLE scan / list scan results / forget the bond |
