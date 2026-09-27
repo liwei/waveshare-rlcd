@@ -34,7 +34,15 @@ static const char *TAG = "gameboy_rlcd";
 
 #define CFG_PATH SD_MOUNT_POINT "/gameboy.cfg"
 #define SAVE_EXT ".sav"
-#define STATE_EXT ".state"
+// Save states live in numbered slots, one file each: <rom>.st1 and so on. Four
+// is enough to keep a checkpoint without turning the card into a mess, and the
+// extension is deliberately not ".state" so the old automatic snapshot cannot
+// be mistaken for one of them.
+#define STATE_SLOTS 4
+#define STATE_SLOT_EXT_MAX 8
+
+static bool state_exists(const char *rom_path, int slot);
+static int resume_slot(const char *rom_path);
 
 typedef struct {
   char last_rom[256];
@@ -44,6 +52,7 @@ typedef struct {
   bool cgb; /* run colour cartridges on the CGB core instead of as a DMG */
   pad_binding_t padmap[PAD_BINDING_MAX]; /* button mappings, keyed by pad model */
   int padmap_count;
+  int last_slot; /* the save slot last written or read, for resuming */
 } cfg_t;
 
 static cfg_t s_cfg;
@@ -100,6 +109,7 @@ static void cfg_load(void) {
   s_cfg.volume = AUDIO_VOLUME_DEFAULT;
   s_cfg.audio_engine = AUDIO_ENGINE_PCM;
   s_cfg.cgb = true;
+  s_cfg.last_slot = 1;
 
   FILE *f = fopen(CFG_PATH, "r");
   if (f == NULL) {
@@ -119,6 +129,11 @@ static void cfg_load(void) {
       s_cfg.muted = atoi(line + 6) != 0;
     } else if (strncmp(line, "cgb=", 4) == 0) {
       s_cfg.cgb = atoi(line + 4) != 0;
+    } else if (strncmp(line, "last_slot=", 10) == 0) {
+      const int slot = atoi(line + 10);
+      if (slot >= 1 && slot <= STATE_SLOTS) {
+        s_cfg.last_slot = slot;
+      }
     } else if (strncmp(line, "padmap=", 7) == 0) {
       if (!cfg_parse_padmap(line + 7)) {
         ESP_LOGW(TAG, "ignoring a padmap line this build cannot use: %s", line + 7);
@@ -140,6 +155,7 @@ static void cfg_save(void) {
   fprintf(f, "audio_engine=%d\n", s_cfg.audio_engine);
   fprintf(f, "muted=%d\n", s_cfg.muted ? 1 : 0);
   fprintf(f, "cgb=%d\n", s_cfg.cgb ? 1 : 0);
+  fprintf(f, "last_slot=%d\n", s_cfg.last_slot);
 
   for (int i = 0; i < s_cfg.padmap_count; i++) {
     fprintf(f, "padmap=%04x:%04x:", s_cfg.padmap[i].vid, s_cfg.padmap[i].pid);
@@ -231,9 +247,20 @@ static bool load_persist(const char *rom_path) {
   return ok;
 }
 
-static bool save_state(const char *rom_path) {
+// The slot's file, next to the ROM: "pokemon.gb" slot 2 -> "pokemon.st2".
+static bool state_path(const char *rom_path, int slot, char *out, size_t out_size) {
+  if (slot < 1 || slot > STATE_SLOTS) {
+    return false;
+  }
+
+  char ext[STATE_SLOT_EXT_MAX];
+  snprintf(ext, sizeof(ext), ".st%d", slot);
+  return sibling_path(rom_path, ext, out, out_size);
+}
+
+static bool save_state(const char *rom_path, int slot) {
   char path[256];
-  if (!sibling_path(rom_path, STATE_EXT, path, sizeof(path))) {
+  if (!state_path(rom_path, slot, path, sizeof(path))) {
     return false;
   }
 
@@ -261,9 +288,9 @@ static bool save_state(const char *rom_path) {
   return ok;
 }
 
-static bool load_state(const char *rom_path) {
+static bool load_state(const char *rom_path, int slot) {
   char path[256];
-  if (!sibling_path(rom_path, STATE_EXT, path, sizeof(path))) {
+  if (!state_path(rom_path, slot, path, sizeof(path))) {
     return false;
   }
 
@@ -650,7 +677,7 @@ typedef enum {
 static void pause_badge(int index, char *out, size_t out_size) {
   switch (index) {
     case 2:
-      snprintf(out, out_size, "slot 1");
+      snprintf(out, out_size, "slot %d", s_cfg.last_slot);
       break;
     case 3:
       snprintf(out, out_size, "%s", audio_is_muted() ? "muted" : "on");
@@ -669,6 +696,37 @@ static void pause_badge(int index, char *out, size_t out_size) {
       break;
     default:
       break;
+  }
+}
+
+// The four slots, marked with what is in them, for saving into or loading from.
+// Returns the chosen slot number, or 0 if nothing was picked.
+static void slot_badge(int index, char *out, size_t out_size) {
+  snprintf(out, out_size, "%s", state_exists(s_rom_path, index + 1) ? "used" : "empty");
+}
+
+static int menu_state_slot(const char *title, bool saving) {
+  static const char *const kSlots[STATE_SLOTS] = {"Slot 1", "Slot 2", "Slot 3", "Slot 4"};
+  int selection = 0;
+
+  while (true) {
+    const int chosen = ui_menu(title, kSlots, STATE_SLOTS, selection, slot_badge);
+    if (chosen < 0) {
+      return 0;
+    }
+    selection = chosen;
+
+    const int slot = chosen + 1;
+    if (saving && state_exists(s_rom_path, slot)) {
+      // Writing over a checkpoint is worth one question.
+      static const char *const kConfirm[] = {"Overwrite it", "Keep it"};
+      char question[32];
+      snprintf(question, sizeof(question), "SLOT %d IS USED", slot);
+      if (ui_menu(question, kConfirm, 2, 1, NULL) != 0) {
+        continue;
+      }
+    }
+    return slot;
   }
 }
 
@@ -699,12 +757,30 @@ static run_action_t menu_pause(void) {
     selection = chosen;
 
     switch (chosen) {
-      case 1:
-        ui_notice("SAVE", save_state(s_rom_path) ? "Saved" : "No save written", 700);
+      case 1: {
+        const int slot = menu_state_slot("SAVE STATE", true);
+        if (slot != 0) {
+          const bool ok = save_state(s_rom_path, slot);
+          if (ok) {
+            s_cfg.last_slot = slot;
+            cfg_save();
+          }
+          ui_notice("SAVE", ok ? "Saved" : "Could not write", 700);
+        }
         break;
-      case 2:
-        ui_notice("LOAD", load_state(s_rom_path) ? "Loaded" : "No snapshot", 700);
+      }
+      case 2: {
+        const int slot = menu_state_slot("LOAD STATE", false);
+        if (slot != 0) {
+          const bool ok = load_state(s_rom_path, slot);
+          if (ok) {
+            s_cfg.last_slot = slot;
+            cfg_save();
+          }
+          ui_notice("LOAD", ok ? "Loaded" : "That slot is empty", 700);
+        }
         break;
+      }
       case 3: {
         const bool muted = !audio_is_muted();
         audio_set_muted(muted);
@@ -913,7 +989,10 @@ static void run_rom(const uint8_t *rom, size_t size, const char *path, bool want
     if (path != NULL) {
       load_persist(path);
       if (want_snapshot) {
-        load_state(path);
+        const int slot = resume_slot(path);
+        if (slot != 0) {
+          load_state(path, slot);
+        }
       }
     }
     want_snapshot = false; /* only on the first pass */
@@ -921,23 +1000,41 @@ static void run_rom(const uint8_t *rom, size_t size, const char *path, bool want
     action = run_emulator();
 
     if (path != NULL) {
-      // Leaving a game writes both: the cartridge's battery RAM, and a snapshot
-      // so the next open can offer to resume exactly here.
+      // The cartridge's battery RAM is written on the way out, always: that is
+      // the game's own save, and losing it would lose real progress. Snapshots
+      // are not written automatically - they belong in the slot the player
+      // chose, and silently overwriting one on exit is how a checkpoint
+      // disappears.
       save_persist(path);
-      save_state(path);
     }
   }
 }
 
 // Whether the previous session left a snapshot for this ROM.
-static bool state_exists(const char *rom_path) {
+static bool state_exists(const char *rom_path, int slot) {
   char path[256];
   struct stat st;
 
-  if (!sibling_path(rom_path, STATE_EXT, path, sizeof(path))) {
+  if (!state_path(rom_path, slot, path, sizeof(path))) {
     return false;
   }
   return stat(path, &st) == 0;
+}
+
+// The slot a resume should use: the one most recently saved or loaded, if it is
+// still there, otherwise the first that is.
+static int resume_slot(const char *rom_path) {
+  if (s_cfg.last_slot >= 1 && s_cfg.last_slot <= STATE_SLOTS &&
+      state_exists(rom_path, s_cfg.last_slot)) {
+    return s_cfg.last_slot;
+  }
+
+  for (int slot = 1; slot <= STATE_SLOTS; slot++) {
+    if (state_exists(rom_path, slot)) {
+      return slot;
+    }
+  }
+  return 0;
 }
 
 // Offer to pick up where the last session left off. "New game" boots the cart
@@ -1006,7 +1103,7 @@ void app_main(void) {
     if (pick == UI_ROM_PICK_LOAD_LAST) {
       strlcpy(rom_path, s_cfg.last_rom, sizeof(rom_path));
       want_snapshot = true;
-    } else if (state_exists(rom_path)) {
+    } else if (resume_slot(rom_path) != 0) {
       want_snapshot = ask_resume(rom_path);
     }
 

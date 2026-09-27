@@ -59,11 +59,17 @@ static int add_entry(rom_entry_t *out, int count, int max, const char *relative)
   char sibling_path[ROM_FILES_PATH_MAX];
   snprintf(path, sizeof(path), "%s/%s", SD_MOUNT_POINT, relative);
 
-  bool save = false;
-  static const char *const kExtras[] = {".sav", ".state"};
-  for (size_t i = 0; i < sizeof(kExtras) / sizeof(kExtras[0]) && !save; i++) {
-    char name[ROM_FILES_REL_MAX];
-    sibling(relative, kExtras[i], name, sizeof(name));
+  // The cartridge save, or any of the numbered state slots. More slots than the
+  // emulator has is harmless: this only asks whether the file is there.
+  char name[ROM_FILES_REL_MAX];
+  sibling(relative, ".sav", name, sizeof(name));
+  snprintf(sibling_path, sizeof(sibling_path), "%s/%s", SD_MOUNT_POINT, name);
+  bool save = exists(sibling_path);
+
+  for (int slot = 1; !save && slot <= 8; slot++) {
+    char ext[8];
+    snprintf(ext, sizeof(ext), ".st%d", slot);
+    sibling(relative, ext, name, sizeof(name));
     if (name[0] == '\0') {
       continue;
     }
@@ -209,14 +215,23 @@ bool rom_files_delete(const char *name) {
     return false;
   }
 
-  static const char *const kExtras[] = {".sav", ".state"};
-  for (size_t i = 0; i < sizeof(kExtras) / sizeof(kExtras[0]); i++) {
+  // The cartridge save and every state slot go with it. Absence is not an error,
+  // so asking for slots that were never used costs nothing.
+  for (int extra = 0; extra <= 8; extra++) {
+    char ext[8] = ".sav";
+    if (extra > 0) {
+      snprintf(ext, sizeof(ext), ".st%d", extra);
+    }
+
     char sibling_name[ROM_FILES_REL_MAX];
-    sibling(name, kExtras[i], sibling_name, sizeof(sibling_name));
+    sibling(name, ext, sibling_name, sizeof(sibling_name));
+    if (sibling_name[0] == '\0') {
+      continue;
+    }
 
     char sibling_path[ROM_FILES_PATH_MAX];
     snprintf(sibling_path, sizeof(sibling_path), "%s/%s", SD_MOUNT_POINT, sibling_name);
-    remove(sibling_path); // absence is not an error
+    remove(sibling_path);
   }
 
   return true;

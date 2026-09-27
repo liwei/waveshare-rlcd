@@ -119,7 +119,7 @@ right-hand column shows the current state of each setting.
 | Item | |
 | --- | --- |
 | Resume | back to the game |
-| Save state / Load state | snapshot next to the ROM as `<rom>.state` |
+| Save state / Load state | choose one of four slots, written beside the ROM as `<rom>.st1` … `.st4` |
 | Sound: toggle | mute, without stopping the emulation |
 | Volume down / up | 5% steps, stored in the config file |
 | Video mode | switch between the **DMG** and **CGB** cores (see below) |
@@ -360,10 +360,15 @@ WPA2 passphrase is the only gate on a page that can delete files.
 * Entries carry a **CGB** or **CGB only** marker when the cartridge header asks
   for colour. Selecting a colour-*only* cart while the DMG core is chosen offers
   to switch, rather than running it into garbage.
-* Leaving a game automatically writes both the cartridge's battery RAM
-  (`<rom>.sav`) and a snapshot (`<rom>.state`), so quitting never loses
-  progress. The pause menu's *Save state* / *Load state* are still there for
-  manual snapshots.
+* Leaving a game writes the cartridge's battery RAM (`<rom>.sav`) and nothing
+  else. That file is the game's own save, and losing it would lose real progress,
+  so it is written on the way out whatever else happens. Snapshots are not
+  written automatically: they go in the slot you choose, because silently
+  overwriting one on exit is how a checkpoint disappears.
+* **Save state** and **Load state** in the pause menu each offer four slots,
+  marked `used` or `empty`, written beside the ROM as `<rom>.st1` … `<rom>.st4`.
+  Saving over a used slot asks first. Opening a game resumes the slot last saved
+  or loaded, if it is still there.
 * Opening a ROM that has a snapshot asks **Resume** or **New game**. *Resume*
   restores the snapshot exactly; *New game* boots the cartridge from scratch.
   The two saves are independent, so *New game* does not touch the game's own
