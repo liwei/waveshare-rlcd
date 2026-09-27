@@ -9,7 +9,8 @@
 //   x  frame-skip policy: auto, never, or every other frame
 //   i  the pad's button mapping: each control, the index it uses, and the Game Boy button that comes out
 //   j  inject a pad button press (cycles through the indices)
-//   t  pull a trigger: R2 (quick save) then L2 (quick load), alternating
+//   t  press the quick save and quick load buttons, alternating
+//   q  what the pad has done since last asked: buttons seen, axis extremes
 //   v  dump the connected pad's HID report descriptor
 //   g  core registers
 //   p  toggle logging of every BLE input report (for unknown pads)

@@ -377,12 +377,18 @@ WPA2 passphrase is the only gate on a page that can delete files.
 * A `Built-in test ROM` entry is always offered, and is what runs when there is
   no card inserted.
 * The path `/sdcard/gameboy.cfg` remembers the last game, volume and mute state.
-* **Quick save and load** are on the pad's triggers: R2 writes slot 0 and L2 reads
-  it, with a word in the status strip to say it happened. It is the same slot
-  every time until overwritten, which is the point - try something, and put it
-  back if it fails. Slot 0 is separate from the four in the pause menu, so a
-  quick save cannot overwrite a checkpoint. Pads whose triggers are not reported
-  as the Z and Rz axes have no quick save.
+* **Quick save and load**: R2 writes slot 0 and L2 reads it, with a word in the
+  status strip to say it happened, the same slot every time until overwritten.
+  That is the point - try something, and put it back if it fails - and slot 0 is
+  separate from the four in the pause menu, so a quick save cannot overwrite a
+  checkpoint.
+* Both are rows on the **button mapping** page like anything else, so a pad whose
+  triggers are somewhere unexpected can be taught. They are bound to whatever
+  buttons the pad uses for them: on the Q36 that is buttons 8 and 9, found by
+  pressing them and looking at what arrived. A pad that reports its triggers as
+  the Z and Rz *axes* is recognised as well, above a threshold past the middle of
+  the axis - anything lower fires once at connection and never again, since
+  untouched axes sit at their centre rather than at zero.
 * Audio is the ES8311 over I2S at **48 kHz**, fed from minigb_apu through a mono
   ring buffer by a task on core 0. The APU produces 804 samples per Game Boy
   frame (804 × 59.7275 = 48.02 kHz, 0.04% fast), which the fixed playback clock

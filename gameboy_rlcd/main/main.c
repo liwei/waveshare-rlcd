@@ -401,14 +401,16 @@ static const esp_hid_scan_result_t *bt_choose_device(esp_hid_scan_result_t **res
 
 /* -------------------------------------------------- gamepad button mapping */
 
-// The page lists the Game Boy's own buttons and asks which pad button plays
-// each. Swapping two of them is a matter of assigning both by hand - there is
-// no mode or profile to reason about.
+// The page lists what the device needs - the Game Boy's buttons, the menu, and
+// the two quick actions - and asks which pad button does each. Swapping two of
+// them is a matter of assigning both by hand; there is no mode or profile to
+// reason about.
 #define MAPPING_RESET_ROW PAD_ACTION_COUNT
 
 static const char *const kMappingItems[PAD_ACTION_COUNT + 1] = {
-    "A",       "B",         "Start",     "Select",    "Up",       "Down",
-    "Left",    "Right",     "Menu",      "Reset this pad",
+    "A",     "B",        "Start",     "Select",     "Up",       "Down",
+    "Left",  "Right",    "Menu",      "Quick save", "Quick load",
+    "Reset this pad",
 };
 
 // The stored binding for this pad, seeded from what the pad currently uses so

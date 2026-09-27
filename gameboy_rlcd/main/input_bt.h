@@ -46,6 +46,9 @@ typedef enum {
   PAD_ACTION_LEFT,
   PAD_ACTION_RIGHT,
   PAD_ACTION_MENU,
+  PAD_ACTION_QUICK_SAVE, /* not a Game Boy button: an emulator action, mapped
+                          * like one so it can be bound on the mapping page */
+  PAD_ACTION_QUICK_LOAD,
   PAD_ACTION_COUNT
 } pad_action_t;
 
@@ -87,6 +90,10 @@ bool input_bt_identity(uint16_t *vid, uint16_t *pid);
 void input_bt_capture_begin(void);
 int input_bt_capture_take(void); /* -1 until a button is pressed, then its index */
 void input_bt_capture_end(void);
+
+// What the pad has done since this was last called: every button bit seen, and
+// each axis's extremes. For working out where an unfamiliar pad puts something.
+void input_bt_take_activity(uint32_t *buttons, int32_t *mins, int32_t *maxs);
 
 // One-shot requests from the triggers: R2 asks for a quick save, L2 for a quick
 // load. True once per pull. Pads without trigger axes never ask.

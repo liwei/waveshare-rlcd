@@ -49,9 +49,30 @@ static volatile bool s_quick_save;
 static volatile bool s_quick_load;
 static bool s_trigger_prev[2];
 
-// A trigger counts as pulled a little past halfway; these axes idle near zero
-// and reach the axis maximum at the stop.
-#define TRIGGER_THRESHOLD 96
+// A pad that reports its triggers as axes leaves them at the centre of the axis
+// range - 128 on an 8-bit axis - when they are untouched. A threshold below that
+// is true from the first report on, which is how an earlier version fired one
+// quick save at every connection and then ignored the triggers entirely.
+#define TRIGGER_THRESHOLD 220
+
+// What the pad has been doing since the last time anyone asked: every button bit
+// it has set, and how far each axis has travelled. A press is caught whether or
+// not it is still held when the question is asked, which matters when the thing
+// being looked for - a trigger on a pad that hides it somewhere unexpected - can
+// only be found by pressing it and looking afterwards.
+static volatile uint32_t s_seen_buttons;
+static volatile int32_t s_axis_min[4];
+static volatile int32_t s_axis_max[4];
+static bool s_axis_seen;
+
+static void track_axis(int index, int32_t value) {
+  if (!s_axis_seen || value < s_axis_min[index]) {
+    s_axis_min[index] = value;
+  }
+  if (!s_axis_seen || value > s_axis_max[index]) {
+    s_axis_max[index] = value;
+  }
+}
 static volatile bool s_has_hat; /* the pad reports its D-pad as a hat switch */
 static uint32_t s_reports_seen; /* report IDs seen since this pad connected */
 
@@ -131,6 +152,7 @@ typedef struct {
   int8_t lb, rb;
   int8_t select, start, guide;
   int8_t dpad_up, dpad_down, dpad_left, dpad_right; /* -1: d-pad is a hat */
+  int8_t quick_save, quick_load;                    /* -1: not reported as a button */
 } pad_profile_t;
 
 static const pad_profile_t kProfiles[] = {
@@ -138,13 +160,13 @@ static const pad_profile_t kProfiles[] = {
     // was read off the wire: A=0 B=1 X=3 Y=4 LB=6 RB=7 Start=10 Select=11. The
     // remaining indices were never observed, so no guide button is claimed;
     // Start+Select opens the menu instead.
-    {0x1949, 0x0402, "Fire TV / Android", 0, 1, 3, 4, 6, 7, 11, 10, -1, -1, -1, -1, -1},
+    {0x1949, 0x0402, "Fire TV / Android", 0, 1, 3, 4, 6, 7, 11, 10, -1, -1, -1, -1, -1, 8, 9},
     // Xbox Wireless Controller and anything that copies it.
-    {0x045E, 0x02FD, "Xbox", 0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14},
+    {0x045E, 0x02FD, "Xbox", 0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, -1, -1},
 };
 
 static const pad_profile_t kDefaultProfile = {
-    0, 0, "generic (Xbox layout)", 0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14};
+    0, 0, "generic (Xbox layout)", 0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, -1, -1};
 
 static const pad_profile_t *s_profile = &kDefaultProfile;
 
@@ -181,6 +203,10 @@ static int8_t builtin_action(const pad_profile_t *p, int action) {
       return p->dpad_right;
     case PAD_ACTION_MENU:
       return p->guide;
+    case PAD_ACTION_QUICK_SAVE:
+      return p->quick_save;
+    case PAD_ACTION_QUICK_LOAD:
+      return p->quick_load;
     default:
       return -1;
   }
@@ -388,12 +414,23 @@ static void handle_pad_state(const hid_gamepad_map_t *map, const hid_gamepad_sta
              (unsigned)s_rx_total);
   }
 
+  s_seen_buttons |= state->buttons;
+  track_axis(0, state->x);
+  track_axis(1, state->y);
+  track_axis(2, state->z);
+  track_axis(3, state->rz);
+  s_axis_seen = true;
+
   // Triggers, before anything else gets to swallow the report: R2 saves, L2
   // loads. In the axes these pads use, Z is the left trigger and Rz the right -
   // the DirectInput naming Microsoft kept for compatibility - so the right hand
   // is the one that saves. A pad without trigger axes never fires these.
-  const bool save_now = state->rz >= TRIGGER_THRESHOLD;
-  const bool load_now = state->z >= TRIGGER_THRESHOLD;
+  const int8_t quick_save = s_actions[PAD_ACTION_QUICK_SAVE];
+  const int8_t quick_load = s_actions[PAD_ACTION_QUICK_LOAD];
+  const bool save_now = state->rz >= TRIGGER_THRESHOLD ||
+                        (quick_save >= 0 && ((state->buttons >> quick_save) & 1u));
+  const bool load_now = state->z >= TRIGGER_THRESHOLD ||
+                        (quick_load >= 0 && ((state->buttons >> quick_load) & 1u));
   if (save_now && !s_trigger_prev[0]) {
     s_quick_save = true;
   }
@@ -542,6 +579,8 @@ static void hidh_callback(void *handler_args, esp_event_base_t base, int32_t id,
 
       s_connected = true;
       s_reports_seen = 0;
+      s_seen_buttons = 0;
+      s_axis_seen = false;
       s_rx_total = 0;
       s_rx_with_buttons = 0;
       s_media_only_warned = false;
@@ -879,6 +918,22 @@ void input_bt_capture_end(void) {
 }
 
 uint32_t input_bt_live_buttons(void) { return s_live_buttons; }
+
+// Report what the pad has done since this was last called, and start again.
+void input_bt_take_activity(uint32_t *buttons, int32_t *mins, int32_t *maxs) {
+  if (buttons != NULL) {
+    *buttons = s_seen_buttons;
+  }
+  if (mins != NULL && maxs != NULL) {
+    for (int i = 0; i < 4; i++) {
+      mins[i] = s_axis_min[i];
+      maxs[i] = s_axis_max[i];
+    }
+  }
+
+  s_seen_buttons = 0;
+  s_axis_seen = false;
+}
 
 bool input_bt_take_quick_save(void) {
   const bool edge = s_quick_save;

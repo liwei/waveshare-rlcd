@@ -220,14 +220,38 @@ void console_poll(void) {
         break;
       }
       case 't': {
-        // Pull a trigger through the same path a real report takes: R2 (quick
-        // save) then L2 (quick load), alternating, so both can be exercised
-        // without the pad in hand.
-        static bool right;
-        const int index = right ? 33 : 34;
+        // Press whichever button the quick actions are bound to, through the
+        // same path a real report takes. Alternates save and load.
+        static bool save_next = true;
+        const int action = save_next ? PAD_ACTION_QUICK_SAVE : PAD_ACTION_QUICK_LOAD;
+        const int index = input_bt_action_get(action);
+        if (index < 0) {
+          write_str("quick actions are not bound\n");
+          break;
+        }
+
         input_bt_test_press(index);
-        write_fmt("pulled %s\n", right ? "R2 (quick save)" : "L2 (quick load)");
-        right = !right;
+        write_fmt("pressed button %d (quick %s)\n", index, save_next ? "save" : "load");
+        save_next = !save_next;
+        break;
+      }
+      case 'q': {
+        uint32_t buttons = 0;
+        int32_t mins[4];
+        int32_t maxs[4];
+        input_bt_take_activity(&buttons, mins, maxs);
+
+        write_fmt("pad activity: buttons 0x%08lx", (unsigned long)buttons);
+        for (int bit = 0; bit < 32; bit++) {
+          if (buttons & (1u << bit)) {
+            write_fmt(" %d", bit);
+          }
+        }
+        write_str("\n");
+        static const char *const kAxes[4] = {"x", "y", "z(LT)", "rz(RT)"};
+        for (int i = 0; i < 4; i++) {
+          write_fmt("  %-6s %ld .. %ld\n", kAxes[i], (long)mins[i], (long)maxs[i]);
+        }
         break;
       }
       case 'v': {
