@@ -11,9 +11,11 @@ cores from the pause menu — on the panel's fixed four shades, since a reflecti
 
 It is an ESP-IDF project and sits alongside the Arduino `dino_rlcd/` sketch in
 this repository; the two share the vendored `codec_board` + `esp_codec_dev`
-components but are otherwise independent.
+components but are otherwise independent. A second application in `manager/`
+turns the same board into a WiFi access point for managing the SD card, and the
+two switch between each other from the picker. See [ROM manager](#rom-manager-wifi).
 
-![The built-in test ROM: four shades rendered on a 1-bit panel](docs/shades.png)
+![Four shades rendered on a 1-bit panel](docs/shades.png)
 
 ## What runs where
 
@@ -35,7 +37,7 @@ no BR/EDR**. That last point matters and is explained under *Bluetooth*.
 
 | Function | Pins |
 | --- | --- |
-| RLCD (SPI2) | SCLK 11, MOSI 12, CS 40, DC 5, RST 41 — 24 MHz, mode 0 |
+| RLCD (SPI2) | SCLK 11, MOSI 12, CS 40, DC 5, RST 41 — SPI mode 0 |
 | TF card (SDMMC, 1-bit) | CLK 38, CMD 21, D0 39, internal pull-ups |
 | ES8311 codec | I2S MCLK 16, BCLK 9, WS 45, DOUT 10; I2C SDA 13, SCL 14; PA 46 |
 | Buttons | KEY = GPIO18, BOOT = GPIO0, active low |
@@ -82,7 +84,7 @@ columns, so a flush costs roughly 0.28 ms per 6-scanline strip that changed and
 nothing at all for a static screen (the console reports `groups=0`). A moving
 sprite touches only the strips it occupies — a few tenths of a millisecond —
 while a scrolling screen genuinely changes every strip and costs a full repaint
-of 7 ms.
+of 5.85 ms.
 
 The status strip is the bottom 12 framebuffer rows, which is exactly panel
 column group 0, so it is refreshed independently and only when its content
@@ -97,8 +99,8 @@ otherwise widen a small sprite update into a full-screen repaint once a second.
 | BOOT | Game Boy **B** |
 | Hold both ~0.8 s | open the pause menu |
 | In menus | KEY steps through the entries (wrapping at the end), BOOT picks one and leaves the cursor there, hold both ~0.8 s to go back a level |
-| Gamepad triggers | **R2 quick saves, L2 quick loads** — no menu, and "SAVED" / "LOADED" appears in the status strip |
-| Gamepad | D-pad or left stick → D-pad; A/Y → **B**; B/X → **A**; LB/RB → B/A; Select → Select; Start → Start; **Start+Select together → pause menu** |
+| Gamepad, quick actions | **R2 quick saves, L2 quick loads, RB runs fast** — no menu, and "SAVED" / "LOADED" appears in the status strip |
+| Gamepad | D-pad or left stick → D-pad; A/Y → **B**; B/X → **A**; Select → Select; Start → Start; **Start+Select together → pause menu** |
 
 Menus are always navigable with the two physical buttons, so the device is never
 locked out if a gamepad is absent or unpaired. While both buttons are held down
@@ -124,13 +126,14 @@ right-hand column shows the current state of each setting.
 | Sound: toggle | mute, without stopping the emulation |
 | Volume down / up | 5% steps, stored in the config file |
 | Video mode | switch between the **DMG** and **CGB** cores (see below) |
-| Bluetooth | scan, pair, forget |
+| Bluetooth | scan, pair, forget; **Button mapping** teaches the pad its buttons |
 | Reset game | restart the cart with its battery save, like a power cycle |
 | Change game | save and return to the ROM picker |
 
-**To quit a game, open the pause menu and choose *Change game*.** Both the
-cartridge's battery RAM and a snapshot are written on the way out, and opening
-that ROM again offers *Resume* or *New game*.
+**To quit a game, open the pause menu and choose *Change game*.** The cartridge's
+battery RAM is written on the way out — a snapshot is not, because overwriting one
+on exit is how a checkpoint disappears. Opening that ROM again offers *Resume*,
+which restores the slot last saved or loaded, or *New game*.
 
 ### Video modes
 
@@ -211,10 +214,12 @@ D-pad as a hat switch, as buttons, or only as a left stick are all handled.
 logs every input report that changes, which is how an unknown pad's layout gets
 worked out.
 
-The Q36's remaining button indices (2, 5, 8, 9, 12-15) were never observed, so
-its profile claims no guide button and the menu is opened with **Start+Select**,
-which uses only verified indices. A guide index is only listed for a profile
-that has actually been seen to send one.
+Of the Q36's button indices, **8 and 9 are its two triggers** — buttons on this
+pad, not the axes its descriptor advertises, and pressing them is how that was
+established. Indices 2, 5 and 12-15 have never been seen to arrive, so its
+profile claims no guide button and the menu is opened with **Start+Select**
+instead, which uses only verified indices. A guide index is listed only for a
+profile that has actually been seen to send one.
 
 ### Button mapping
 
@@ -254,7 +259,7 @@ Assigning a button to a direction overrides the hat for that direction only,
 leaving the other three alone.
 
 On the capture screen, `KEY` alone clears the assignment and both buttons held
-cancel; nothing pressed for 15 s returns to the list. The buttons that opened the
+cancel; nothing pressed for 60 s returns to the list. The buttons that opened the
 capture stay swallowed until released, so binding a direction cannot walk the
 cursor across the page underneath.
 
@@ -266,9 +271,9 @@ ignored in favour of the built-in table rather than half-applied. *Reset this
 pad* drops the assignment outright. The Q36's two modes have different ids, so a
 mapping learnt in one cannot corrupt the other.
 
-Pads that report only *changed* bytes rather than the whole button field will not
-capture cleanly, since the page compares each decoded report against the last.
-The Q36 sends full reports.
+The baseline for a capture is the button word from the previous report, so what
+counts as a press is a bit that was not set before it. The Q36 sends its whole
+button field every time.
 
 ### When the pad connects but nothing responds
 
@@ -310,8 +315,8 @@ will still say the old one.
 
 The page lists the
 ROMs with their sizes and whether each has a save, takes uploads by drag-and-drop
-or file picker with a progress bar, and deletes a ROM together with its `.sav` and
-`.state` so nothing is orphaned. An upload appears in the picker straight away,
+or file picker with a progress bar, and deletes a ROM together with its `.sav`
+and its `.st1` … `.st4` so nothing is orphaned. An upload appears in the picker straight away,
 because the picker rescans every time it opens. Holding both buttons leaves the
 manager and restarts back into the emulator; entering and leaving are both
 `esp_ota_set_boot_partition` followed by a restart.
@@ -379,27 +384,31 @@ WPA2 passphrase is the only gate on a page that can delete files.
   restores the snapshot exactly; *New game* boots the cartridge from scratch.
   The two saves are independent, so *New game* does not touch the game's own
   in-game save — the game can still offer its own continue.
-* A `Built-in test ROM` entry is always offered, and is what runs when there is
-  no card inserted.
-* The path `/sdcard/gameboy.cfg` remembers the last game, volume and mute state.
+* The picker always offers the **WiFi ROM manager**, and offers *last played* when
+  there is one, so it does something useful with no card inserted at all.
+* The path `/sdcard/gameboy.cfg` remembers the last game, the volume, the mute
+  state, the audio engine, the video mode, the slot to resume from, and the pad
+  mappings.
 * **Quick save and load**: R2 writes slot 0 and L2 reads it, with a word in the
   status strip to say it happened, the same slot every time until overwritten.
   That is the point - try something, and put it back if it fails - and slot 0 is
   separate from the four in the pause menu, so a quick save cannot overwrite a
   checkpoint.
-* **Fast forward** is a row on the mapping page too, and starts unbound - there
-  is nothing sensible to guess, so bind it to whatever is comfortable. Hold that
+* **Fast forward** is a row on the mapping page like anything else. Hold that
   button and the emulator stops waiting for the 60 Hz tick and runs as fast as it
   can, painting every third frame. On Pokémon Green that is **1.7x to 2.7x**
   depending on the scene - bounded by how busy the game is, not by a limit of its
-  own. Sound continues at its normal pitch.
-* The quick actions are rows on the **button mapping** page like anything else, so a pad whose
-  triggers are somewhere unexpected can be taught. They are bound to whatever
-  buttons the pad uses for them: on the Q36 that is buttons 8 and 9, found by
-  pressing them and looking at what arrived. A pad that reports its triggers as
-  the Z and Rz *axes* is recognised as well, above a threshold past the middle of
-  the axis - anything lower fires once at connection and never again, since
-  untouched axes sit at their centre rather than at zero.
+  own. Sound continues at its normal pitch. The frames it does not paint still
+  change the picture, so their columns are carried forward to the next paint
+  rather than dropped: painting only the current frame's columns left stale
+  patches behind.
+* The three actions are rows on the **button mapping** page like anything else, so
+  a pad whose triggers are somewhere unexpected can be taught. On the Q36 they are
+  buttons 9 (R2, saves) and 8 (L2, loads), found by pressing them and reading what
+  arrived - the axis naming is no guide to which is which. A pad that reports its
+  triggers as the Z and Rz *axes* is recognised as well, above a threshold past
+  the middle of the axis: anything lower fires once at connection and never again,
+  since untouched axes sit at their centre rather than at zero.
 * Audio is the ES8311 over I2S at **48 kHz**, fed from minigb_apu through a mono
   ring buffer by a task on core 0. The APU produces 804 samples per Game Boy
   frame (804 × 59.7275 = 48.02 kHz, 0.04% fast), which the fixed playback clock
@@ -445,8 +454,10 @@ Compiles `hid_gamepad.c` against a stub of the ESP-IDF logging macros and checks
 it against a real 139-byte gamepad report descriptor (report IDs, 32 buttons,
 six 16-bit axes) plus a conventional hat-switch descriptor, decoding every hat
 position and non-byte-aligned axis values. It has already earned its keep: it
-caught an Input-item operand that was not being consumed, which desynchronised
-the descriptor stream and would have made every BLE gamepad silently dead.
+caught the collections' own usages being accumulated as local items, which
+shifted every axis and button offset along: it read the Q36 as having `x` at bit
+16 and no `z` or `rz` at all, and its analog sticks were decoding trigger bytes
+until that was fixed.
 
 ## Serial console
 
@@ -462,11 +473,13 @@ stops reading cannot stall the emulator.
 | `x` | frame-skip policy: auto, never, or every other frame |
 | `i` | the button map: each Game Boy button and the pad button that plays it |
 | `j` | inject a pad button press, cycling through the indices (no pad needed) |
+| `t` | force a quick save, then a quick load, through the pad's own triggers |
+| `h` | hold or release fast forward, with no pad and no binding needed |
+| `q` | pad activity: the button word, and the range each axis has reached |
 | `v` | dump the connected pad's HID report descriptor |
-| `w` | start or stop the WiFi ROM manager (same as its picker entry) |
 | `g` | core registers (PC, LCDC, LY, interrupt state, tile-map base) |
 | `k` / `u` | press / release KEY (`b` for BOOT, `n` for both, `N` to hand control back to the pins) |
-| `B` / `l` / `c` | start a BLE scan / list scan results / forget the bond |
+| `B` / `l` / `C` / `c` | start a BLE scan / list scan results / connect to one / forget the bond |
 
 A heartbeat line (`hb frames=… avg=… emu=… flush=… audio=… groups=…`) prints
 every 5 s; `frames` over the 5 s window is the wall-clock frame rate, which is
@@ -499,7 +512,8 @@ the number that says whether the core is keeping up.
   and toggling back returns to CGB; the choice survives a reboot. The two
   buttons, the menu and the audio all behave the same in both modes.
 * **Saves**: save states write and restore, including across a reboot, and
-  in-game input drives the game.
+  in-game input drives the game. A quick save becomes the resume point as readily
+  as a menu slot does.
 * **Input**: holding A changes the emulated picture deterministically, and the
   pause chord opens and stays on the pause menu.
 * **Audio**: ES8311 opens at 48 kHz, the ring buffer holds steady, and underruns
@@ -530,9 +544,13 @@ which is its own application rather than something the emulator carries.
 gameboy_rlcd/
 ├── CMakeLists.txt        project(); components/ holds the vendored codec components
 ├── sdkconfig.defaults    esp32s3, 16MB flash, OPI PSRAM, BLE-only Bluedroid + esp_hid
-├── partitions.csv        nvs + 4MB app
+├── partitions.csv        nvs + otadata + two 2MB app slots, one per application
 ├── test/                 host-side HID descriptor parser test
+├── tools/flash_all.sh    builds and flashes both applications
 ├── tools/ble_scan.py     host BLE scanner, for checking a pad is BLE-capable
+├── tools/mk_cjkfont.py   generates the CJK glyph subset
+├── tools/mk_wifiqr.py    generates the manager's WiFi join code
+├── manager/              the WiFi ROM manager, a second application
 └── main/
     ├── main.c            front end: storage, frame loop, menus
     ├── st7305.c/.h       panel driver: init sequence, dithering packer, group flushes
@@ -548,7 +566,7 @@ gameboy_rlcd/
     ├── storage_sd.c      SDMMC 1-bit mount and file reads
     ├── console.c/.h      serial diagnostics
     ├── gbemu.c/.h        core wrapper and the 2x dithered blit
-    ├── testrom.h         generated built-in test ROM (see scratchpad generator)
+    ├── cjkfont.bin       140 KB CJK glyph subset, read in place from flash
     ├── crankboy_core/    Peanut-GB, vendored
     └── minigb_apu/       APU, vendored
 ```
