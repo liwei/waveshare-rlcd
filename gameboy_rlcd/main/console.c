@@ -235,6 +235,14 @@ void console_poll(void) {
         save_next = !save_next;
         break;
       }
+      case 'h': {
+        // Hold fast-forward until asked again, whatever is bound to it.
+        static bool held;
+        held = !held;
+        input_bt_test_fast_forward(held);
+        write_fmt("fast forward %s\n", held ? "on" : "off");
+        break;
+      }
       case 'q': {
         uint32_t buttons = 0;
         int32_t mins[4];

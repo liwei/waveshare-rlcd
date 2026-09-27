@@ -408,9 +408,9 @@ static const esp_hid_scan_result_t *bt_choose_device(esp_hid_scan_result_t **res
 #define MAPPING_RESET_ROW PAD_ACTION_COUNT
 
 static const char *const kMappingItems[PAD_ACTION_COUNT + 1] = {
-    "A",     "B",        "Start",     "Select",     "Up",       "Down",
-    "Left",  "Right",    "Menu",      "Quick save", "Quick load",
-    "Reset this pad",
+    "A",       "B",         "Start",     "Select",     "Up",
+    "Down",    "Left",      "Right",     "Menu",       "Quick save",
+    "Quick load", "Fast forward", "Reset this pad",
 };
 
 // The stored binding for this pad, seeded from what the pad currently uses so
@@ -918,8 +918,17 @@ static run_action_t run_emulator(void) {
 
   int64_t next_status_us = 0;
 
+  uint32_t flush_phase = 0;
+
   while (true) {
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    if (input_bt_fast_forward()) {
+      // Run the next frame at once rather than waiting for the 60 Hz tick, and
+      // drop any tick that arrived while the last one ran - otherwise letting
+      // go of the button would spend the backlog in a burst of frames.
+      ulTaskNotifyTake(pdTRUE, 0);
+    } else {
+      ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    }
 
     const int64_t t_start = esp_timer_get_time();
     const uint8_t pad = input_read();
@@ -981,7 +990,10 @@ static run_action_t run_emulator(void) {
         rlcd_flush_groups(fb_buffer(), 0, 0);
       }
     }
-    if (g1 >= g0) {
+    // The panel is slower than the emulator can run under fast-forward, and the
+    // picture is changing every frame, so paint it every third one. The panel
+    // holds what it has, so nothing is lost but the intermediate frames.
+    if (g1 >= g0 && (++flush_phase % 3u == 0u || !input_bt_fast_forward())) {
       rlcd_flush_groups(fb_buffer(), g0, g1);
     }
     const int64_t t_flush = esp_timer_get_time();

@@ -46,9 +46,10 @@ typedef enum {
   PAD_ACTION_LEFT,
   PAD_ACTION_RIGHT,
   PAD_ACTION_MENU,
-  PAD_ACTION_QUICK_SAVE, /* not a Game Boy button: an emulator action, mapped
-                          * like one so it can be bound on the mapping page */
+  PAD_ACTION_QUICK_SAVE, /* not Game Boy buttons: emulator actions, mapped like
+                          * one so they can be bound on the mapping page */
   PAD_ACTION_QUICK_LOAD,
+  PAD_ACTION_FAST_FORWARD,
   PAD_ACTION_COUNT
 } pad_action_t;
 
@@ -95,6 +96,10 @@ void input_bt_capture_end(void);
 // each axis's extremes. For working out where an unfamiliar pad puts something.
 void input_bt_take_activity(uint32_t *buttons, int32_t *mins, int32_t *maxs);
 
+// True while the button bound to fast-forward is held. Unlike the quick actions
+// this is a level, not an edge: it lasts as long as the button does.
+bool input_bt_fast_forward(void);
+
 // One-shot requests from the triggers: R2 asks for a quick save, L2 for a quick
 // load. True once per pull. Pads without trigger axes never ask.
 bool input_bt_take_quick_save(void);
@@ -107,6 +112,13 @@ uint32_t input_bt_live_buttons(void);
 // Console test hook: feed in one button press through the same path a real
 // report takes, so the capture can be checked without a pad.
 void input_bt_test_press(int index);
+
+// Console test hook: hold a set of button bits until told otherwise, for
+// actions that last as long as their button does.
+void input_bt_test_hold(uint32_t buttons);
+
+// Console test hook: force fast-forward on or off, whatever is bound.
+void input_bt_test_fast_forward(bool on);
 
 // Reports received since this pad connected, and how many of them carried a
 // button. "Connected but no report ever carries a button" means the pad is

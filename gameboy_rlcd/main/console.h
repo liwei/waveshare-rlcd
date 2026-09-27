@@ -11,6 +11,7 @@
 //   j  inject a pad button press (cycles through the indices)
 //   t  press the quick save and quick load buttons, alternating
 //   q  what the pad has done since last asked: buttons seen, axis extremes
+//   h  hold, or let go of, the fast-forward button
 //   v  dump the connected pad's HID report descriptor
 //   g  core registers
 //   p  toggle logging of every BLE input report (for unknown pads)

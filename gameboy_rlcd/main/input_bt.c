@@ -47,6 +47,11 @@ static volatile bool s_swallow_buttons;
 // pulled once per press. Edge-detected so holding one does nothing further.
 static volatile bool s_quick_save;
 static volatile bool s_quick_load;
+
+// A sticky press from the console, so a held action can be exercised without a
+// pad. Zero in normal use, and one OR when it is not.
+static volatile uint32_t s_test_held;
+static volatile bool s_test_fast;
 static bool s_trigger_prev[2];
 
 // A pad that reports its triggers as axes leaves them at the centre of the axis
@@ -207,6 +212,8 @@ static int8_t builtin_action(const pad_profile_t *p, int action) {
       return p->quick_save;
     case PAD_ACTION_QUICK_LOAD:
       return p->quick_load;
+    case PAD_ACTION_FAST_FORWARD:
+      return -1; /* nothing to guess: bind it on the mapping page */
     default:
       return -1;
   }
@@ -414,7 +421,7 @@ static void handle_pad_state(const hid_gamepad_map_t *map, const hid_gamepad_sta
              (unsigned)s_rx_total);
   }
 
-  s_seen_buttons |= state->buttons;
+  s_seen_buttons |= state->buttons | s_test_held;
   track_axis(0, state->x);
   track_axis(1, state->y);
   track_axis(2, state->z);
@@ -425,12 +432,13 @@ static void handle_pad_state(const hid_gamepad_map_t *map, const hid_gamepad_sta
   // loads. In the axes these pads use, Z is the left trigger and Rz the right -
   // the DirectInput naming Microsoft kept for compatibility - so the right hand
   // is the one that saves. A pad without trigger axes never fires these.
+  const uint32_t held = state->buttons | s_test_held;
   const int8_t quick_save = s_actions[PAD_ACTION_QUICK_SAVE];
   const int8_t quick_load = s_actions[PAD_ACTION_QUICK_LOAD];
   const bool save_now = state->rz >= TRIGGER_THRESHOLD ||
-                        (quick_save >= 0 && ((state->buttons >> quick_save) & 1u));
+                        (quick_save >= 0 && ((held >> quick_save) & 1u));
   const bool load_now = state->z >= TRIGGER_THRESHOLD ||
-                        (quick_load >= 0 && ((state->buttons >> quick_load) & 1u));
+                        (quick_load >= 0 && ((held >> quick_load) & 1u));
   if (save_now && !s_trigger_prev[0]) {
     s_quick_save = true;
   }
@@ -934,6 +942,20 @@ void input_bt_take_activity(uint32_t *buttons, int32_t *mins, int32_t *maxs) {
   s_seen_buttons = 0;
   s_axis_seen = false;
 }
+
+// Asked rather than remembered: a BLE pad sends nothing while its buttons are
+// still, so anything cached here would only be as fresh as the last report - and
+// for a held action that is no freshness at all.
+bool input_bt_fast_forward(void) {
+  const int8_t fast = s_actions[PAD_ACTION_FAST_FORWARD];
+  const uint32_t held = s_live_buttons | s_test_held;
+
+  return s_test_fast || (fast >= 0 && ((held >> fast) & 1u) != 0);
+}
+
+void input_bt_test_hold(uint32_t buttons) { s_test_held = buttons; }
+
+void input_bt_test_fast_forward(bool on) { s_test_fast = on; }
 
 bool input_bt_take_quick_save(void) {
   const bool edge = s_quick_save;
