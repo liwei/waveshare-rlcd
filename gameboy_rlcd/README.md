@@ -385,9 +385,9 @@ WPA2 passphrase is the only gate on a page that can delete files.
 * **Fast forward** is a row on the mapping page too, and starts unbound - there
   is nothing sensible to guess, so bind it to whatever is comfortable. Hold that
   button and the emulator stops waiting for the 60 Hz tick and runs as fast as it
-  can, painting every third frame. On Pokémon Green that is about **1.7x**; it is
-  bounded by how busy the game is, not by a limit of its own. Sound continues at
-  its normal pitch.
+  can, painting every third frame. On Pokémon Green that is **1.7x to 2.7x**
+  depending on the scene - bounded by how busy the game is, not by a limit of its
+  own. Sound continues at its normal pitch.
 * The quick actions are rows on the **button mapping** page like anything else, so a pad whose
   triggers are somewhere unexpected can be taught. They are bound to whatever
   buttons the pad uses for them: on the Q36 that is buttons 8 and 9, found by

@@ -920,6 +920,14 @@ static run_action_t run_emulator(void) {
 
   uint32_t flush_phase = 0;
 
+  // Columns whose contents have changed but which the panel has not been given
+  // yet. Under fast forward frames are painted every third one, and the two in
+  // between still change the framebuffer - without carrying those changes
+  // forward, a column that changed only in a skipped frame would never be
+  // painted at all, and would sit there showing an older frame.
+  int pending_g0 = 0;
+  int pending_g1 = -1;
+
   while (true) {
     if (input_bt_fast_forward()) {
       // Run the next frame at once rather than waiting for the 60 Hz tick, and
@@ -990,11 +998,22 @@ static run_action_t run_emulator(void) {
         rlcd_flush_groups(fb_buffer(), 0, 0);
       }
     }
-    // The panel is slower than the emulator can run under fast-forward, and the
-    // picture is changing every frame, so paint it every third one. The panel
-    // holds what it has, so nothing is lost but the intermediate frames.
-    if (g1 >= g0 && (++flush_phase % 3u == 0u || !input_bt_fast_forward())) {
-      rlcd_flush_groups(fb_buffer(), g0, g1);
+    if (g1 >= g0) {
+      if (pending_g1 < pending_g0) {
+        pending_g0 = g0;
+        pending_g1 = g1;
+      } else {
+        pending_g0 = (g0 < pending_g0) ? g0 : pending_g0;
+        pending_g1 = (g1 > pending_g1) ? g1 : pending_g1;
+      }
+    }
+
+    // The panel is slower than the emulator can run under fast forward, so paint
+    // every third frame - but paint everything that has changed since the last
+    // paint, not merely this frame's columns.
+    if (pending_g1 >= pending_g0 && (++flush_phase % 3u == 0u || !input_bt_fast_forward())) {
+      rlcd_flush_groups(fb_buffer(), pending_g0, pending_g1);
+      pending_g1 = -1;
     }
     const int64_t t_flush = esp_timer_get_time();
 
