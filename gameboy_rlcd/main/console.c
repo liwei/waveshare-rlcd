@@ -219,6 +219,17 @@ void console_poll(void) {
         next_index = (next_index + 1) % 16;
         break;
       }
+      case 't': {
+        // Pull a trigger through the same path a real report takes: R2 (quick
+        // save) then L2 (quick load), alternating, so both can be exercised
+        // without the pad in hand.
+        static bool right;
+        const int index = right ? 33 : 34;
+        input_bt_test_press(index);
+        write_fmt("pulled %s\n", right ? "R2 (quick save)" : "L2 (quick load)");
+        right = !right;
+        break;
+      }
       case 'v': {
         size_t len = 0;
         const uint8_t *desc = input_bt_descriptor(&len);

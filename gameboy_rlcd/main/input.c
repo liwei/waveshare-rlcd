@@ -94,6 +94,11 @@ static uint8_t menu_buttons(void) {
   // pending when play resumes and would re-open the pause menu straight away.
   (void)input_bt_take_menu();
 
+  // Same for the triggers: a quick save asked for during a menu is not wanted
+  // the moment play resumes.
+  (void)input_bt_take_quick_save();
+  (void)input_bt_take_quick_load();
+
   const uint32_t held = buttons_hold_ms();
 
   if (raw == (BTN_KEY | BTN_BOOT)) {

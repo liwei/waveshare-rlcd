@@ -29,6 +29,10 @@ void ui_text(int x, int y, const char *s, int scale, bool text_ink, bool bg_ink)
 // Bottom status strip: Bluetooth state on the left, battery on the right.
 void ui_status_bar(void);
 
+// Shows `text` in the status strip instead of the Bluetooth state, for a little
+// while. Used for things that need saying without interrupting play.
+void ui_toast(const char *text, uint32_t duration_ms);
+
 // Draw a message and hold it for duration_ms (0 = return immediately).
 void ui_notice(const char *title, const char *message, uint32_t duration_ms);
 

@@ -28,8 +28,12 @@ typedef struct {
 
   bool has_x;
   bool has_y;
+  bool has_z; /* triggers, on pads that report them the DirectInput way */
+  bool has_rz;
   int16_t x_offset;
   int16_t y_offset;
+  int16_t z_offset;
+  int16_t rz_offset;
   uint8_t axis_size;
   int32_t axis_min;
   int32_t axis_max;
@@ -40,6 +44,8 @@ typedef struct {
   int hat;          /* 0..7 clockwise from up, -1 when centred or absent */
   int32_t x;
   int32_t y;
+  int32_t z;  /* 0 at rest, up to the axis maximum when pulled */
+  int32_t rz;
 } hid_gamepad_state_t;
 
 // Parses a report descriptor. Returns the number of input reports found.

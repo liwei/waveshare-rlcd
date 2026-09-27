@@ -85,14 +85,31 @@ void ui_row(int row, const char *text, bool text_ink, bool bg_ink) {
   }
 }
 
+// A message with a deadline, shown in place of the Bluetooth name.
+static char s_toast[24];
+static int64_t s_toast_until_ms;
+
+void ui_toast(const char *text, uint32_t duration_ms) {
+  strlcpy(s_toast, text, sizeof(s_toast));
+  s_toast_until_ms = (esp_timer_get_time() / 1000) + (int64_t)duration_ms;
+}
+
+static bool toast_active(void) {
+  return s_toast[0] != '\0' && (esp_timer_get_time() / 1000) < s_toast_until_ms;
+}
+
 void ui_status_bar(void) {
   const int y = STATUS_Y;
   const int text_y = y + (STATUS_H - FB_CHAR_H) / 2;
 
   fb_fill_rect(0, y, LCD_W, STATUS_H, false);
 
+  // A toast speaks for the strip while it lasts: it says something the player
+  // asked to be told, where the Bluetooth name says something they can look up.
   char left[48];
-  if (input_bt_connected()) {
+  if (toast_active()) {
+    snprintf(left, sizeof(left), "%s", s_toast);
+  } else if (input_bt_connected()) {
     snprintf(left, sizeof(left), "BT: %s", input_bt_name());
   } else {
     snprintf(left, sizeof(left), "BT: --");

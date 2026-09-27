@@ -41,6 +41,9 @@ static const char *TAG = "gameboy_rlcd";
 #define STATE_SLOTS 4
 #define STATE_SLOT_EXT_MAX 8
 
+// Slot 0 is the quick one: R2 writes it and L2 reads it, without a menu.
+#define STATE_QUICK_SLOT 0
+
 static bool state_exists(const char *rom_path, int slot);
 static int resume_slot(const char *rom_path);
 
@@ -131,7 +134,7 @@ static void cfg_load(void) {
       s_cfg.cgb = atoi(line + 4) != 0;
     } else if (strncmp(line, "last_slot=", 10) == 0) {
       const int slot = atoi(line + 10);
-      if (slot >= 1 && slot <= STATE_SLOTS) {
+      if (slot >= STATE_QUICK_SLOT && slot <= STATE_SLOTS) {
         s_cfg.last_slot = slot;
       }
     } else if (strncmp(line, "padmap=", 7) == 0) {
@@ -249,7 +252,7 @@ static bool load_persist(const char *rom_path) {
 
 // The slot's file, next to the ROM: "pokemon.gb" slot 2 -> "pokemon.st2".
 static bool state_path(const char *rom_path, int slot, char *out, size_t out_size) {
-  if (slot < 1 || slot > STATE_SLOTS) {
+  if (slot < STATE_QUICK_SLOT || slot > STATE_SLOTS) {
     return false;
   }
 
@@ -677,7 +680,11 @@ typedef enum {
 static void pause_badge(int index, char *out, size_t out_size) {
   switch (index) {
     case 2:
-      snprintf(out, out_size, "slot %d", s_cfg.last_slot);
+      if (s_cfg.last_slot == STATE_QUICK_SLOT) {
+        snprintf(out, out_size, "quick");
+      } else {
+        snprintf(out, out_size, "slot %d", s_cfg.last_slot);
+      }
       break;
     case 3:
       snprintf(out, out_size, "%s", audio_is_muted() ? "muted" : "on");
@@ -916,6 +923,31 @@ static run_action_t run_emulator(void) {
     const uint8_t pad = input_read();
     paperboy_gb_set_buttons(pad);
 
+    // R2 and L2: a save and a load with no menu in the way, for trying
+    // something and putting it back if it fails. Saved states are per ROM and
+    // survive the session, so this is the same slot every time until it is
+    // overwritten.
+    if (input_bt_take_quick_save()) {
+      const bool ok = save_state(s_rom_path, STATE_QUICK_SLOT);
+      if (ok) {
+        s_cfg.last_slot = STATE_QUICK_SLOT;
+        cfg_save();
+      }
+      ui_toast(ok ? "SAVED" : "SAVE FAILED", 2500);
+      refresh_status_bar();
+      rlcd_flush_groups(fb_buffer(), 0, 0);
+    }
+    if (input_bt_take_quick_load()) {
+      const bool ok = load_state(s_rom_path, STATE_QUICK_SLOT);
+      if (ok) {
+        s_cfg.last_slot = STATE_QUICK_SLOT;
+        cfg_save();
+      }
+      ui_toast(ok ? "LOADED" : "NOTHING SAVED", 2500);
+      refresh_status_bar();
+      rlcd_flush_groups(fb_buffer(), 0, 0);
+    }
+
     if (input_pause_requested()) {
       paperboy_gb_set_buttons(0);
       action = menu_pause();
@@ -1024,7 +1056,7 @@ static bool state_exists(const char *rom_path, int slot) {
 // The slot a resume should use: the one most recently saved or loaded, if it is
 // still there, otherwise the first that is.
 static int resume_slot(const char *rom_path) {
-  if (s_cfg.last_slot >= 1 && s_cfg.last_slot <= STATE_SLOTS &&
+  if (s_cfg.last_slot >= STATE_QUICK_SLOT && s_cfg.last_slot <= STATE_SLOTS &&
       state_exists(rom_path, s_cfg.last_slot)) {
     return s_cfg.last_slot;
   }

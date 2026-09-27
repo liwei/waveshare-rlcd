@@ -42,6 +42,16 @@ static volatile int s_capture_result;
 static uint32_t s_capture_prev;   /* last button word, the baseline for "new" */
 static volatile uint32_t s_live_buttons; /* what the pad last reported */
 static volatile bool s_swallow_buttons;
+
+// The triggers are not Game Boy buttons: they are quick save and quick load,
+// pulled once per press. Edge-detected so holding one does nothing further.
+static volatile bool s_quick_save;
+static volatile bool s_quick_load;
+static bool s_trigger_prev[2];
+
+// A trigger counts as pulled a little past halfway; these axes idle near zero
+// and reach the axis maximum at the stop.
+#define TRIGGER_THRESHOLD 96
 static volatile bool s_has_hat; /* the pad reports its D-pad as a hat switch */
 static uint32_t s_reports_seen; /* report IDs seen since this pad connected */
 
@@ -378,6 +388,21 @@ static void handle_pad_state(const hid_gamepad_map_t *map, const hid_gamepad_sta
              (unsigned)s_rx_total);
   }
 
+  // Triggers, before anything else gets to swallow the report: R2 saves, L2
+  // loads. In the axes these pads use, Z is the left trigger and Rz the right -
+  // the DirectInput naming Microsoft kept for compatibility - so the right hand
+  // is the one that saves. A pad without trigger axes never fires these.
+  const bool save_now = state->rz >= TRIGGER_THRESHOLD;
+  const bool load_now = state->z >= TRIGGER_THRESHOLD;
+  if (save_now && !s_trigger_prev[0]) {
+    s_quick_save = true;
+  }
+  if (load_now && !s_trigger_prev[1]) {
+    s_quick_load = true;
+  }
+  s_trigger_prev[0] = save_now;
+  s_trigger_prev[1] = load_now;
+
   if (s_capture) {
     // Compare against the previous state, and against the last one the pad
     // reported rather than the first to arrive after the screen opened: a BLE
@@ -438,6 +463,15 @@ void input_bt_test_press(int index) {
   memset(&map, 0, sizeof(map));
   memset(&state, 0, sizeof(state));
   state.hat = -1;
+
+  if (index > 32) {
+    // A trigger pull, through the same path a real report takes: index 33 is
+    // R2 (quick save, the Rz axis), 34 is L2 (quick load, Z).
+    state.rz = (index == 33) ? 255 : 0;
+    state.z = (index == 34) ? 255 : 0;
+    handle_pad_state(&map, &state);
+    return;
+  }
 
   handle_pad_state(&map, &state);
   if (index >= 0 && index < 32) {
@@ -845,6 +879,18 @@ void input_bt_capture_end(void) {
 }
 
 uint32_t input_bt_live_buttons(void) { return s_live_buttons; }
+
+bool input_bt_take_quick_save(void) {
+  const bool edge = s_quick_save;
+  s_quick_save = false;
+  return edge;
+}
+
+bool input_bt_take_quick_load(void) {
+  const bool edge = s_quick_load;
+  s_quick_load = false;
+  return edge;
+}
 
 void input_bt_rx_stats(uint32_t *total, uint32_t *with_buttons) {
   if (total != NULL) {

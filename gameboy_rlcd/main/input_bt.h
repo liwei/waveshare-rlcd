@@ -88,6 +88,11 @@ void input_bt_capture_begin(void);
 int input_bt_capture_take(void); /* -1 until a button is pressed, then its index */
 void input_bt_capture_end(void);
 
+// One-shot requests from the triggers: R2 asks for a quick save, L2 for a quick
+// load. True once per pull. Pads without trigger axes never ask.
+bool input_bt_take_quick_save(void);
+bool input_bt_take_quick_load(void);
+
 // The pad's buttons as of its last report. While the capture screen is up this
 // is what makes it visible whether the pad is saying anything at all.
 uint32_t input_bt_live_buttons(void);

@@ -185,9 +185,58 @@ static void test_hat_descriptor(void) {
   CHECK(state.y == 42, "Y decoded as 42 (got %d)", state.y);
 }
 
+
+// The Q36 in Android mode, exactly as it presents itself on the wire: a Consumer
+// Control report and a Game Pad report, the latter with four 8-bit axes, a hat,
+// sixteen buttons and two simulation axes. Its trigger axes matter beyond
+// curiosity - L2 and R2 are Z and Rz, and the emulator's quick save and quick
+// load hang off them - so this checks the offsets land on the right bytes.
+static void test_q36_descriptor(void) {
+  static const uint8_t descriptor[] = {
+      0x05, 0x0c, 0x09, 0x01, 0xa1, 0x01, 0x85, 0x03, 0x75, 0x10, 0x95, 0x01, 0x15, 0x00, 0x26, 0x9c,
+      0x02, 0x19, 0x01, 0x2a, 0x9c, 0x02, 0x81, 0x00, 0xc0, 0x05, 0x01, 0x09, 0x05, 0xa1, 0x01, 0x85,
+      0x04, 0x09, 0x01, 0xa1, 0x00, 0x09, 0x30, 0x09, 0x31, 0x09, 0x32, 0x09, 0x35, 0x15, 0x00, 0x26,
+      0xff, 0x00, 0x75, 0x08, 0x95, 0x04, 0x81, 0x02, 0xc0, 0x09, 0x39, 0x15, 0x00, 0x25, 0x07, 0x35,
+      0x00, 0x46, 0x3b, 0x01, 0x65, 0x14, 0x75, 0x04, 0x95, 0x01, 0x81, 0x42, 0x75, 0x04, 0x95, 0x01,
+      0x81, 0x01, 0x05, 0x09, 0x19, 0x01, 0x29, 0x10, 0x15, 0x00, 0x25, 0x01, 0x75, 0x01, 0x95, 0x10,
+      0x81, 0x02, 0x05, 0x02, 0x15, 0x00, 0x26, 0xff, 0x00, 0x09, 0xc4, 0x09, 0xc5, 0x95, 0x02, 0x75,
+      0x08, 0x81, 0x02, 0x75, 0x08, 0x95, 0x01, 0x81, 0x01, 0xc0,
+  };
+
+  hid_gamepad_map_t maps[4];
+  const int count = hid_gamepad_parse(descriptor, sizeof(descriptor), maps, 4);
+  CHECK(count == 2, "Q36 descriptor yields 2 reports (got %d)", count);
+
+  const hid_gamepad_map_t *pad = hid_gamepad_find(maps, count, 4);
+  if (pad != NULL) {
+    printf("      map: x=%d@%d y=%d@%d z=%d@%d rz=%d@%d hat=%d@%d size=%u\n", pad->has_x,
+           pad->x_offset, pad->has_y, pad->y_offset, pad->has_z, pad->z_offset, pad->has_rz,
+           pad->rz_offset, pad->has_hat, pad->hat_offset, (unsigned)pad->axis_size);
+  }
+  CHECK(pad != NULL && pad->has_x && pad->has_y, "the gamepad report has X and Y");
+  CHECK(pad != NULL && pad->has_z && pad->has_rz, "and the trigger axes Z and Rz");
+  CHECK(pad != NULL && pad->button_count == 16, "with 16 buttons (got %d)",
+        pad != NULL ? pad->button_count : -1);
+
+  // Byte 0 X, 1 Y, 2 Z, 3 Rz, 4 hat, 5-6 buttons, 7-8 simulation, 9 padding.
+  uint8_t report[10] = {0};
+  report[2] = 255; /* left trigger at the stop */
+  hid_gamepad_state_t state;
+  hid_gamepad_decode(pad, report, sizeof(report), &state);
+  CHECK(state.z == 255, "Z decodes the left trigger (got %d)", state.z);
+  CHECK(state.rz == 0, "and Rz stays released (got %d)", state.rz);
+  CHECK(state.x == 0 && state.y == 0, "with both sticks centred");
+
+  report[2] = 0;
+  report[3] = 200;
+  hid_gamepad_decode(pad, report, sizeof(report), &state);
+  CHECK(state.rz == 200, "Rz decodes the right trigger (got %d)", state.rz);
+}
+
 int main(void) {
   test_real_descriptor();
   test_hat_descriptor();
+  test_q36_descriptor();
   printf("\n%s (%d failure%s)\n", failures == 0 ? "ALL PASS" : "FAILURES", failures,
          failures == 1 ? "" : "s");
   return failures != 0;

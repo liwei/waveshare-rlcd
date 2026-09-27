@@ -97,6 +97,7 @@ otherwise widen a small sprite update into a full-screen repaint once a second.
 | BOOT | Game Boy **B** |
 | Hold both ~0.8 s | open the pause menu |
 | In menus | KEY steps through the entries (wrapping at the end), BOOT picks one and leaves the cursor there, hold both ~0.8 s to go back a level |
+| Gamepad triggers | **R2 quick saves, L2 quick loads** — no menu, and "SAVED" / "LOADED" appears in the status strip |
 | Gamepad | D-pad or left stick → D-pad; A/Y → **B**; B/X → **A**; LB/RB → B/A; Select → Select; Start → Start; **Start+Select together → pause menu** |
 
 Menus are always navigable with the two physical buttons, so the device is never
@@ -376,6 +377,12 @@ WPA2 passphrase is the only gate on a page that can delete files.
 * A `Built-in test ROM` entry is always offered, and is what runs when there is
   no card inserted.
 * The path `/sdcard/gameboy.cfg` remembers the last game, volume and mute state.
+* **Quick save and load** are on the pad's triggers: R2 writes slot 0 and L2 reads
+  it, with a word in the status strip to say it happened. It is the same slot
+  every time until overwritten, which is the point - try something, and put it
+  back if it fails. Slot 0 is separate from the four in the pause menu, so a
+  quick save cannot overwrite a checkpoint. Pads whose triggers are not reported
+  as the Z and Rz axes have no quick save.
 * Audio is the ES8311 over I2S at **48 kHz**, fed from minigb_apu through a mono
   ring buffer by a task on core 0. The APU produces 804 samples per Game Boy
   frame (804 × 59.7275 = 48.02 kHz, 0.04% fast), which the fixed playback clock

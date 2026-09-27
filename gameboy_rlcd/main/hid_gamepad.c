@@ -12,6 +12,8 @@ static const char *TAG = "hid";
 
 #define USAGE_X 0x30
 #define USAGE_Y 0x31
+#define USAGE_Z 0x32  /* left trigger, on pads that report triggers as axes */
+#define USAGE_RZ 0x35 /* right trigger */
 #define USAGE_HAT_SWITCH 0x39
 
 // One entry per report id seen in the descriptor. All the input items that make
@@ -151,6 +153,18 @@ int hid_gamepad_parse(const uint8_t *desc, size_t len, hid_gamepad_map_t *maps, 
     }
 
     /* Main item */
+    if (tag == 0xa || tag == 0xb) { /* Collection, End Collection */
+      // A collection is a Main item, so it clears the local items around it like
+      // any other. Its own usage - "Game Pad", "Pointer" - would otherwise sit
+      // in front of the fields that follow and shift every one of them along,
+      // which is exactly what it did: a pad declaring X, Y, Z and Rz in one
+      // Input item had its sticks read out of the trigger bytes.
+      read_item(desc, len, &pos, size);
+      usage_count = 0;
+      have_usage_range = false;
+      continue;
+    }
+
     if (tag == 0x8) { /* Input */
       int state = -1;
       for (int i = 0; i < report_count_seen; i++) {
@@ -210,6 +224,12 @@ int hid_gamepad_parse(const uint8_t *desc, size_t len, hid_gamepad_map_t *maps, 
               map->axis_size = (uint8_t)report_size;
               map->axis_min = logical_min;
               map->axis_max = logical_max;
+            } else if (usage == USAGE_Z && !map->has_z) {
+              map->has_z = true;
+              map->z_offset = (int16_t)(*offset);
+            } else if (usage == USAGE_RZ && !map->has_rz) {
+              map->has_rz = true;
+              map->rz_offset = (int16_t)(*offset);
             } else if (usage == USAGE_Y && !map->has_y) {
               map->has_y = true;
               map->y_offset = (int16_t)(*offset);
@@ -303,5 +323,11 @@ void hid_gamepad_decode(const hid_gamepad_map_t *map, const uint8_t *data, size_
   }
   if (map->has_y) {
     out->y = extract_field(data, len, map->y_offset, map->axis_size, map->axis_min < 0);
+  }
+  if (map->has_z) {
+    out->z = extract_field(data, len, map->z_offset, map->axis_size, map->axis_min < 0);
+  }
+  if (map->has_rz) {
+    out->rz = extract_field(data, len, map->rz_offset, map->axis_size, map->axis_min < 0);
   }
 }

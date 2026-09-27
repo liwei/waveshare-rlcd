@@ -27,3 +27,8 @@ const char *input_bt_name(void);
 
 // True once per press of the gamepad's guide button (consumes the edge).
 bool input_bt_take_menu(void);
+
+// One-shot requests from the gamepad's triggers: R2 asks for a quick save, L2
+// for a quick load. True once per pull.
+bool input_bt_take_quick_save(void);
+bool input_bt_take_quick_load(void);
