@@ -1,161 +1,113 @@
-# Chromium dino game — Waveshare ESP32-S3-RLCD-4.2
+# ESP32-S3-RLCD-4.2 projects
 
-A port of Chrome's offline T-Rex runner to the Waveshare ESP32-S3-RLCD-4.2
-(ESP32-S3-WROOM-1-N16R8 + 4.2" 300×400 reflective LCD).
+Two firmwares for one board: a **Game Boy emulator** and **Chrome's offline
+dino game**, both drawn on the same 4.2" reflective LCD.
 
-> **Two projects live here.** This file covers the Arduino dino game in
-> `dino_rlcd/`. There is also a Game Boy emulator in [`gameboy_rlcd/`](gameboy_rlcd/README.md)
-> — an ESP-IDF port of [PaperBoy](https://gitlab.com/zephray/paperboy) with
-> microSD ROM loading, ES8311 audio and a Bluetooth (BLE HID) gamepad.
+| Project | What it is | Built with |
+| --- | --- | --- |
+| [`gameboy_rlcd/`](gameboy_rlcd/README.md) | A Game Boy that runs from ROMs on the SD card, with a Bluetooth gamepad, save states and a WiFi ROM manager. | ESP-IDF 5.5 |
+| [`dino_rlcd/`](dino_rlcd/README.md) | The T-Rex runner, ported from Chromium's own artwork and constants. | arduino-cli |
 
-**Controls**
+Neither uses a backlight or colour: the panel is reflective and one bit per
+pixel, so everything is drawn in four ordered-dither shades of ink on paper. The
+Game Boy emulator is the larger of the two and the one still being worked on;
+the dino port is finished, and both are documented and measured on real
+hardware rather than on a simulator.
 
-| Button | Action |
+## The board
+
+Waveshare ESP32-S3-RLCD-4.2 — an ESP32-S3-WROOM-1-N16R8 (16 MB flash, 8 MB OPI
+PSRAM, **Bluetooth 5 LE only, no classic Bluetooth**) with a 300×400 ST7305
+panel, a microSD slot, an ES8311 codec and two buttons.
+
+| Function | Pins |
 | --- | --- |
-| **KEY** (GPIO18) | Jump — tap for a short hop, hold for a full jump. Starts the game and restarts after a crash. |
-| **BOOT** (GPIO0) | Pause / resume. Also starts the game. |
+| RLCD (SPI2) | SCLK 11, MOSI 12, CS 40, DC 5, RST 41 |
+| TF card (SDMMC, 1-bit) | CLK 38, CMD 21, D0 39 |
+| ES8311 codec | I2S MCLK 16, BCLK 9, WS 45, DOUT 10; I2C SDA 13, SCL 14; PA 46 |
+| Buttons | KEY = GPIO18, BOOT = GPIO0, active low |
+| Battery | ADC1 channel 3 = GPIO4, behind a 100k/200k divider |
 
-## Artwork and logic are Chromium's, verbatim
+Sound needs a speaker on the MX1.25 2-pin connector; without one the codec still
+initialises and runs silently. The panel's driver came from Waveshare's own
+[`ESP32-S3-RLCD-4.2`](https://github.com/waveshareteam/ESP32-S3-RLCD-4.2)
+reference, as did the pin map above.
 
-Nothing is redrawn or re-tuned by hand.
+## One board, one firmware at a time
 
-* **Artwork** — every bitmap is extracted pixel-for-pixel from the official
-  `components/neterror/resources/images/default_100_percent/offline/100-offline-sprite.png`.
-  The crop coordinates come straight from `dino_game/offline_sprite_definitions.ts`
-  (`ldpi`), including the cactus clustering trick where a size-N cluster is a
-  single wider sprite at `sourceX = spritePos.x + width*size*0.5*(size-1)`.
-* **Logic** — gameplay constants and rules are ported from
-  `dino_game/{offline,trex,obstacle,horizon,distance_meter,cloud,night_mode}.ts`:
+**Flashing one of these replaces the other.** They need different partition
+tables: the dino game is an Arduino sketch built with `PartitionScheme=app3M_fat9M_16MB`,
+while the emulator defines its own `partitions.csv` — two 2 MB application slots
+plus `otadata`, so it can carry the ROM manager in the second slot and switch
+between them. The two layouts put the application in different places, so the
+second one flashed is the one that boots, and switching means re-flashing.
 
-  | | |
-  | --- | --- |
-  | `ACCELERATION` 0.001, `SPEED` 6, `MAX_SPEED` 13 | `GRAVITY` 0.6, `INIITAL_JUMP_VELOCITY` -10 |
-  | `DROP_VELOCITY` -5, `SPEED_DROP_COEFFICIENT` 3 | `MIN`/`MAX_JUMP_HEIGHT` 30 |
-  | `GAP_COEFFICIENT` 0.6, `MAX_GAP_COEFFICIENT` 1.5 | `MAX_OBSTACLE_LENGTH` 3, `MAX_OBSTACLE_DUPLICATION` 2 |
-  | `COEFFICIENT` 0.025, `ACHIEVEMENT_DISTANCE` 100 | `INVERT_DISTANCE` 700, fade 12000 ms |
-  | `BG_CLOUD_SPEED` 0.2, `MAX_CLOUDS` 6 | `START_X_POS` 50, `BOTTOM_PAD` 10 |
-
-  Collision boxes, obstacle `minGap`/`multipleSpeed`/`minSpeed` gating, the
-  `getGap()` widening, the running/blinking/crashed animation frame rates, the
-  zero-padded 5-digit score, the `HI` prefix, the score flash on every 100
-  points and the day/night inversion are all reproduced as in the original.
-* **Sound** — `generated_sound_fx.ts` synthesises its cues from triangle-wave
-  oscillators rather than shipping audio files, and so does this port
-  (`audio.cpp`): two oscillators detuned by +1 Hz and −2 Hz through a gain node
-  that sits at 0.1 and fades over the last 50 ms. Played through the on-board
-  ES8311 via `esp_codec_dev` + Waveshare's `codec_board` (vendored under `src/`).
-
-  | Cue | Notes | Trigger |
-  | --- | --- | --- |
-  | `jump()` | 659.25 Hz 116 ms → 880 Hz 232 ms | KEY press |
-  | `collect()` | 830.61 Hz 116 ms → 1318.51 Hz 232 ms | every 100 points |
-  | `stopAll()` | 103.83 Hz 232 ms → 116.54 Hz 232 ms | crash |
-
-  The `background()` jingle and `loopFootSteps()` cues are omitted: those belong
-  to Chromium's audio-cue accessibility mode (a footstep thump every 280 ms) and
-  two of the notes sit near 70 Hz, below what the MX1.25 speaker can reproduce.
-
-### Three deliberate deviations
-
-1. **No ducking.** The board has only two buttons and both are spoken for, so
-   the pterodactyl uses the original's `yPosMobile` heights `[100, 50]` —
-   exactly what Chromium does on touch devices that cannot duck either. Both
-   heights stay meaningful: the low one must be jumped, the high one must *not*
-   be.
-2. **Spawn edge is 400 px, not 600.** The panel is narrower than the original
-   600 px canvas, so obstacles enter at the screen edge. Everything else —
-   obstacle sizes, jump arc, gaps — is unchanged, which makes the game a little
-   more intense than in a browser window.
-3. **Pixel polarity is flipped in the driver.** The ST7305 lights a pixel for a
-   *set* bit (Waveshare's own U8g2 demo renders light-on-dark), whereas U8g2's
-   framebuffer uses a set bit for ink. `rlcd.cpp` therefore transmits the
-   reference lookup table with each row reversed. This also makes the
-   night-mode buffer fill come out as a dark screen rather than a bright one.
-
-The simulation runs in the original 600×150 canvas coordinate space on a fixed
-60 Hz tick (Chromium's `FPS`), so the per-frame constants transfer unchanged;
-only the final `y` is offset by `RENDER_DY` when drawing.
+The SD card is untouched by all of this. ROMs, saves and the emulator's config
+live on the card, not in flash, so they survive re-flashing either firmware.
 
 ## Layout
 
 ```
-dino_rlcd/
-├── dino_rlcd.ino   setup/loop, 60 Hz fixed-timestep pacing, buttons, serial console
-├── config.h        pin map, panel size, tick rate
-├── audio.{h,cpp}   Chromium's synthesised sound cues -> ES8311
-├── rlcd.{h,cpp}    ST7305 300x400 driver (U8g2 framebuffer + direct SPI panel writes)
-├── game.{h,cpp}    the ported game
-├── sprites.h       generated from Chromium's sprite sheet - do not edit
-└── src/ExternLib/  vendored codec_board + esp_codec_dev (Waveshare / Espressif, MIT)
+.
+├── gameboy_rlcd/         the emulator: ESP-IDF project
+│   ├── main/             front end, menus, panel driver, input, audio, console
+│   ├── manager/          the WiFi ROM manager, a second application
+│   ├── components/       vendored codec_board + esp_codec_dev
+│   ├── tools/            flash both apps, CJK font generator, WiFi QR, BLE scan
+│   └── test/             host-side test for the HID report descriptor parser
+└── dino_rlcd/            the dino game: Arduino sketch
+    ├── dino_rlcd.ino     setup/loop, 60 Hz pacing, buttons, serial console
+    └── src/ExternLib/    vendored codec_board + esp_codec_dev
 ```
 
-The ST7305 init sequence and the tile → panel-row conversion are ported from
-Waveshare's reference driver in
-[`waveshareteam/ESP32-S3-RLCD-4.2`](https://github.com/waveshareteam/ESP32-S3-RLCD-4.2).
-Sprites are blitted by hand rather than with `u8g2_DrawXBMP`, because obstacles
-and the 600 px horizon tile need to scroll past the left edge and
-`u8g2_DrawXBMP` rejects negative coordinates.
+Each project vendors its own copy of Waveshare's `codec_board` and Espressif's
+`esp_codec_dev`, adapted to its own build system — an Arduino sketch and an
+ESP-IDF component do not want the same build files. There is no shared source
+between the two.
 
-## Build and flash
+## Building
 
-Requires `arduino-cli` with `esp32:esp32` ≥ 3.3.0 and the **U8g2** library.
+The two use different toolchains and neither build touches the other.
+
+**The emulator** needs ESP-IDF 5.5 and the Xtensa toolchain:
+
+```sh
+. ~/esp/esp-idf/export.sh
+cd gameboy_rlcd
+idf.py set-target esp32s3
+idf.py -p /dev/cu.usbmodemXXXX flash monitor
+```
+
+Both of its applications are built and flashed by `gameboy_rlcd/tools/flash_all.sh`,
+which is what you want unless you enjoy re-flashing the emulator by hand after
+the manager's own `idf.py flash` has overwritten it.
+
+**The dino game** needs `arduino-cli` with `esp32:esp32` ≥ 3.3.0 and the U8g2
+library:
 
 ```sh
 arduino-cli lib install U8g2
-
-FQBN="esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,CPUFreq=240,FlashMode=qio,\
-FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,PSRAM=opi,UploadSpeed=921600,DebugLevel=none"
-
 arduino-cli compile --fqbn "$FQBN" dino_rlcd
 arduino-cli upload  -p /dev/cu.usbmodem1401 --fqbn "$FQBN" dino_rlcd
 ```
 
-These match Waveshare's recommended IDE settings for this board (USB CDC on
-boot, OPI PSRAM, 16 MB flash).
+`$FQBN` is spelled out in [`dino_rlcd/README.md`](dino_rlcd/README.md#build-and-flash).
 
-## Serial console
+Both are flashed over the board's native USB-C port, which is also the serial
+console for each. Both open at 115200 baud.
 
-The firmware exposes a small diagnostic console at 115200 baud, which is handy
-because the panel is the only other output. Status and framebuffer output run
-on a low-priority background task through a bounded queue, so serial backpressure
-does not block the 60 Hz game loop:
+## Provenance
 
-| Key | Action |
-| --- | --- |
-| `d` | Dump the framebuffer (`FBUF` magic + length + raw u8g2 buffer) so a host can rebuild a screenshot |
-| `s` | Print one status line: state, score, high score, speed, dino y, nearest obstacle |
-| `k` / `u` | Inject a KEY press / release |
-| `b` | Inject a BOOT press |
+* **Game Boy core** — [PaperBoy](https://gitlab.com/zephray/paperboy)'s build of
+  Peanut-GB, vendored unmodified, with PaperBoy's menus adapted to this panel.
+  Peanut-GB © Mahyar Koshkouei, MIT; PaperBoy © Wenting Zhang. Pinned at
+  `e70b293`.
+* **Dino artwork and gameplay** — Chromium's, extracted pixel-for-pixel from its
+  sprite sheet and ported rule by rule from its TypeScript. Nothing is redrawn.
+* **Panel driver and codec glue** — ported from Waveshare's reference driver and
+  their `codec_board`, MIT.
 
-A heartbeat line (`fps=…`) is printed every 2 seconds.
-
-## Verified on hardware
-
-* Steady **60 fps** with a full-screen flush every frame.
-* Closed-loop autoplay over the serial console reached **score 1414** with one
-  crash in 150 s, ~175 clean jumps — the jump arc clears the widest cactus
-  clusters at every speed.
-* Idle, running, jumping, paused, game-over, score flash and night-mode frames
-  were all dumped from the panel and eyeballed.
-* High score persists across reboots (NVS, namespace `dino`).
-* Pixel polarity confirmed on the physical panel.
-* With sound enabled, a 150 s autoplay reached **score 1464** with one crash and
-  ~190 cues fired (176 jumps, 14 score milestones, 2 crashes) with no resets,
-  still at 60 fps. The clincher that the audio task doesn't disturb the
-  simulation: speed advanced 6.4 → 12.4 across 100 s, exactly the
-  `ACCELERATION` × 60 Hz × 100 s the model predicts.
-* The audio itself still needs an ear — attach a speaker to the MX1.25
-  connector to hear the cues.
-* A top-left battery icon shows the Waveshare ADC-derived 0–100% estimate.
-  The bolt icon is inferred from sustained battery-voltage rise because the
-  board exposes no documented digital charger-status input; it may not show
-  while charging if the battery voltage is nearly flat.
-
-## Notes
-
-* The high score can be cleared by erasing NVS, e.g.
-  `esptool.py --port /dev/cu.usbmodem1401 erase_region 0x9000 0x6000`.
-* Sound needs a speaker on the MX1.25 2-pin connector. Without one the codec
-  still initialises and the mixer runs silently, so nothing else changes.
-* Opening the USB-CDC port with a terminal program asserts DTR/RTS and resets
-  the ESP32-S3, and the port number can change when that happens.
+Two things the emulator does not do, in case they are what you came for: **CGB
+colour is not emulated** (the hardware is, the palettes are not, so colour games
+are drawn as four shades), and there is no link cable. The
+[emulator's README](gameboy_rlcd/README.md#not-implemented) has the details.

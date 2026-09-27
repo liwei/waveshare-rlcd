@@ -10,8 +10,8 @@ cores from the pause menu — on the panel's fixed four shades, since a reflecti
 1-bit LCD has no colour to give. See [Video modes](#video-modes).
 
 It is an ESP-IDF project and sits alongside the Arduino `dino_rlcd/` sketch in
-this repository; the two share the vendored `codec_board` + `esp_codec_dev`
-components but are otherwise independent. A second application in `manager/`
+this repository, which is a separate project with its own copy of the vendored
+`codec_board` + `esp_codec_dev` components; the two share no source. A second application in `manager/`
 turns the same board into a WiFi access point for managing the SD card, and the
 two switch between each other from the picker. See [ROM manager](#rom-manager-wifi).
 
