@@ -53,6 +53,10 @@ typedef enum {
   PAD_ACTION_COUNT
 } pad_action_t;
 
+// The name shown for an action, in menus and on the console. Lives beside the
+// enum so that adding an action and forgetting its name is one edit, not two.
+const char *input_bt_action_name(int action);
+
 #define PAD_BINDING_MAX 4
 
 // A user mapping for one pad: which raw HID button index plays each Game Boy

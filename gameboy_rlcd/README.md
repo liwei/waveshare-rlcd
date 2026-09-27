@@ -198,6 +198,11 @@ reports, falling back to the Xbox layout:
 | Amazon Fire TV (`1949:0402`, i.e. the Q36 in Android mode) | 0 | 1 | 3 | 4 | 6 | 7 | 11 | 10 |
 | Xbox (`045e:02fd`), default | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
 
+The Q36's triggers are reported as *buttons*, 9 for R2 and 8 for L2, and its RB
+has nothing to do on a Game Boy - so the profile binds the three extra actions
+there: R2 quick saves, L2 quick loads, RB runs fast. A pad whose triggers are
+axes instead leaves them unbound, for the mapping page to sort out.
+
 The face buttons deliberately drive the opposite Game Boy button to their own
 label: A and Y act as B, B and X act as A. The pairs are what matters, so pads
 whose face buttons are labelled differently still play. Pads that present the

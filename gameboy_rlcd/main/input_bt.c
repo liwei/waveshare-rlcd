@@ -157,7 +157,8 @@ typedef struct {
   int8_t lb, rb;
   int8_t select, start, guide;
   int8_t dpad_up, dpad_down, dpad_left, dpad_right; /* -1: d-pad is a hat */
-  int8_t quick_save, quick_load;                    /* -1: not reported as a button */
+  int8_t quick_save, quick_load; /* -1: not reported as a button */
+  int8_t fast_forward;
 } pad_profile_t;
 
 static const pad_profile_t kProfiles[] = {
@@ -165,13 +166,15 @@ static const pad_profile_t kProfiles[] = {
     // was read off the wire: A=0 B=1 X=3 Y=4 LB=6 RB=7 Start=10 Select=11. The
     // remaining indices were never observed, so no guide button is claimed;
     // Start+Select opens the menu instead.
-    {0x1949, 0x0402, "Fire TV / Android", 0, 1, 3, 4, 6, 7, 11, 10, -1, -1, -1, -1, -1, 8, 9},
+    // Its triggers are buttons 8 (L2) and 9 (R2); RB has nothing to do on a Game
+    // Boy, so it runs fast. The D-pad is a hat, so those four are unmapped.
+    {0x1949, 0x0402, "Fire TV / Android", 0, 1, 3, 4, 6, 7, 11, 10, -1, -1, -1, -1, -1, 9, 8, 7},
     // Xbox Wireless Controller and anything that copies it.
-    {0x045E, 0x02FD, "Xbox", 0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, -1, -1},
+    {0x045E, 0x02FD, "Xbox", 0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, -1, -1, -1},
 };
 
 static const pad_profile_t kDefaultProfile = {
-    0, 0, "generic (Xbox layout)", 0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, -1, -1};
+    0, 0, "generic (Xbox layout)", 0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, -1, -1, -1};
 
 static const pad_profile_t *s_profile = &kDefaultProfile;
 
@@ -213,7 +216,7 @@ static int8_t builtin_action(const pad_profile_t *p, int action) {
     case PAD_ACTION_QUICK_LOAD:
       return p->quick_load;
     case PAD_ACTION_FAST_FORWARD:
-      return -1; /* nothing to guess: bind it on the mapping page */
+      return p->fast_forward;
     default:
       return -1;
   }
@@ -801,6 +804,15 @@ const char *input_bt_status_text(void) {
 
 uint8_t input_bt_buttons(void) { return s_connected ? s_gb_mask : 0; }
 bool input_bt_connected(void) { return s_connected; }
+
+const char *input_bt_action_name(int action) {
+  static const char *const kNames[PAD_ACTION_COUNT] = {
+      "A",      "B",     "Start",      "Select",     "Up",        "Down",
+      "Left",   "Right", "Menu",       "Quick save", "Quick load", "Fast forward",
+  };
+
+  return (action >= 0 && action < PAD_ACTION_COUNT) ? kNames[action] : "?";
+}
 
 int8_t input_bt_action_get(int action) {
   if (action < 0 || action >= PAD_ACTION_COUNT) {

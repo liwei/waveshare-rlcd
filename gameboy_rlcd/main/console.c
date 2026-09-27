@@ -277,15 +277,14 @@ void console_poll(void) {
         break;
       }
       case 'i': {
-        static const char *const names[PAD_ACTION_COUNT] = {
-            "A", "B", "Start", "Select", "Up", "Down", "Left", "Right", "Menu"};
         write_fmt("button map (%s):\n", input_bt_connected() ? input_bt_name() : "no pad, default");
         for (int i = 0; i < PAD_ACTION_COUNT; i++) {
           const int8_t index = input_bt_action_get(i);
           if (index < 0) {
-            write_fmt("  %-7s not set\n", names[i]);
+            write_fmt("  %-12s not set\n", input_bt_action_name(i));
           } else {
-            write_fmt("  %-7s idx %2d  %s\n", names[i], index, input_bt_index_name(index));
+            write_fmt("  %-12s idx %2d  %s\n", input_bt_action_name(i), index,
+                      input_bt_index_name(index));
           }
         }
         break;

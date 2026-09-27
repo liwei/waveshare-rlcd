@@ -407,11 +407,8 @@ static const esp_hid_scan_result_t *bt_choose_device(esp_hid_scan_result_t **res
 // reason about.
 #define MAPPING_RESET_ROW PAD_ACTION_COUNT
 
-static const char *const kMappingItems[PAD_ACTION_COUNT + 1] = {
-    "A",       "B",         "Start",     "Select",     "Up",
-    "Down",    "Left",      "Right",     "Menu",       "Quick save",
-    "Quick load", "Fast forward", "Reset this pad",
-};
+// Filled from input_bt_action_name, plus a row to put the pad back to defaults.
+static const char *kMappingItems[PAD_ACTION_COUNT + 1];
 
 // The stored binding for this pad, seeded from what the pad currently uses so
 // every entry written out is complete.
@@ -541,6 +538,11 @@ static int capture_pad_button(const char *label) {
 static void menu_key_mapping(void) {
   uint16_t vid;
   uint16_t pid;
+
+  for (int i = 0; i < PAD_ACTION_COUNT; i++) {
+    kMappingItems[i] = input_bt_action_name(i);
+  }
+  kMappingItems[MAPPING_RESET_ROW] = "Reset this pad";
 
   if (!input_bt_connected()) {
     ui_notice("KEY MAPPING", "Connect a gamepad first", 1500);
